@@ -1,0 +1,24 @@
+{
+    "css": "styles.css",
+    "resources": "resources",
+    "animations": [
+        {
+            "type": "fade_in",
+            "when": "narration-starts",
+            "what": "segment"
+        },
+        {
+            "type": "fade_out",
+            "when": "narration-ends",
+            "what": "segment"
+        }
+    ],
+    "layout": {
+        "vertical_align": {
+            "align": "bottom",
+            "offset": 0.30000000000000004
+        },
+        "max_width_ratio": 0.85,
+        "max_number_of_lines": 1
+    }
+}

@@ -1,0 +1,44 @@
+{
+    "css": "styles.css",
+    "layout": {
+        "max_width_ratio": 0.8,
+        "max_number_of_lines": 2,
+        "min_number_of_lines": 1,
+        "y_words_space": 5,
+        "vertical_align": {
+            "align": "bottom",
+            "offset": "-0.05"
+        }
+    },
+    "splitters": [
+        {
+            "type": "split_into_sentences"
+        },
+        {
+            "type": "limit_by_chars",
+            "min_chars": 20,
+            "max_chars": 40
+        }
+    ],
+    "animations": [
+        {
+            "type": "fade_in",
+            "when": "narration-starts",
+            "what": "segment",
+            "duration": 0.2
+        },
+        {
+            "type": "fade_out",
+            "when": "narration-ends",
+            "what": "segment",
+            "duration": 0.2
+        }
+    ],
+    "tagger_rules": [
+        {
+            "type": "ai",
+            "tag": "highlighted",
+            "prompt": "most relevant and impactful phrases (around 4-5 words)"
+        }
+    ]
+}

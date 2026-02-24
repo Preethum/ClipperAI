@@ -1,0 +1,25 @@
+@font-face {
+    font-family: 'HormoziFont';
+    src: url('resources/font.ttf');
+}
+
+.word {
+    font-family: 'HormoziFont', sans-serif;
+    font-size: 85px;
+    font-weight: 900;
+    color: #FFFFFF;
+    text-transform: uppercase;
+    
+    /* Heavy stroke and shadow for maximum contrast */
+    -webkit-text-stroke: 4px #000000;
+    filter: drop-shadow(5px 5px 0px rgba(0,0,0,1));
+    
+    /* Required for transform animations to work properly */
+    display: inline-block;
+    margin: 0; 
+}
+
+/* The active word highlight */
+.word-being-narrated {
+    color: #FFF200; /* Signature Viral Yellow */
+}

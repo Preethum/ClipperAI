@@ -1,0 +1,61 @@
+{
+    "css": "style.css",
+    "resources": "resources",
+    "video": {
+        "quality": "high"
+    },
+    "whisper": {
+        "model": "base",
+        "language": "en"
+    },
+    "layout": {
+        "x_words_space": 15,
+        "y_words_space": 0,
+        "max_number_of_lines": 1,
+        "min_number_of_lines": 1,
+        "vertical_align": {
+            "align": "center",
+            "offset": 0.1
+        }
+    },
+    "splitters": [
+        {
+            "type": "limit_by_chars",
+            "max_chars": 15,
+            "min_chars": 2
+        }
+    ],
+    "effects": [
+        {
+            "type": "remove_punctuation_marks",
+            "punctuation_marks": [".", ",", ";", ":", "-", "!"],
+            "exception_marks": ["$"]
+        }
+    ],
+    "sound_effects": [
+        {
+            "type": "preset",
+            "name": "pop",
+            "when": "narration-starts",
+            "what": "word",
+            "volume": 0.4
+        }
+    ],
+    "animations": [
+        {
+            "type": "pop_in_primitive",
+            "when": "narration-starts",
+            "what": "word",
+            "duration": 0.15,
+            "init_scale": 0.5,
+            "transformer": "ease_out"
+        }
+    ],
+    "tagger_rules": [
+        {
+            "type": "regex",
+            "tag": "money-or-number",
+            "regex": "\\$?\\d+"
+        }
+    ]
+}
