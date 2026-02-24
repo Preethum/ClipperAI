@@ -1,0 +1,66 @@
+{
+    "css": "styles.css",
+    "resources": "resources",
+    "layout": {
+        "max_width_ratio": 0.8,
+        "max_number_of_lines": 2,
+        "min_number_of_lines": 1,
+        "vertical_align": {
+            "align": "center",
+            "offset": -0.1
+        }
+    },
+    "splitters": [
+        {
+            "type": "limit_by_chars",
+            "min_chars": 10,
+            "max_chars": 25
+        }
+    ],
+    "animations": [
+        {
+            "type": "zoom_in_primitive",
+            "when": "narration-starts",
+            "what": "word",
+            "duration": 0.2,
+            "init_scale": 0.5,
+            "overshoot": {
+                "amount": 0.1,
+                "peak_at": 0.7
+            }
+        },
+        {
+            "type": "slide_in_primitive",
+            "when": "narration-starts",
+            "what": "segment",
+            "duration": 0.4,
+            "direction": "left",
+            "distance": 80,
+            "transformer": "ease_out"
+        },
+        {
+            "type": "slide_out",
+            "when": "narration-ends",
+            "what": "segment",
+            "duration": 0.3,
+            "direction": "right"
+        }
+    ],
+    "sound_effects": [
+        {
+            "type": "preset",
+            "name": "ding",
+            "when": "narration-starts",
+            "what": "word",
+            "volume": 0.2,
+            "tag_condition": "highlighted"
+        }
+    ],
+    "tagger_rules": [
+        {
+            "type": "ai",
+            "prompt": "the most important phrase or word in all the script",
+            "tag": "highlighted"
+        }
+    ]
+}

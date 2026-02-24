@@ -1,0 +1,7 @@
+*.mp4
+clipper-venv/
+__pycache__/
+*.log
+*.exe
+*.pt
+*.pth

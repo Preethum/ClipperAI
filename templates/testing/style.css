@@ -1,0 +1,30 @@
+@font-face {
+    font-family: 'HormoziFont';
+    src: url('resources/font.ttf');
+}
+
+.word {
+    font-family: 'HormoziFont', 'Impact', sans-serif;
+    font-size: 85px;
+    font-weight: 900;
+    color: #FFFFFF;
+    text-transform: uppercase;
+    
+    /* Deep Viral Shadow */
+    -webkit-text-stroke: 4px #000000;
+    filter: drop-shadow(0px 8px 0px #000000);
+    
+    /* Required for proper scale animations */
+    display: inline-block;
+    margin: 0; 
+}
+
+/* Default highlight for the active word */
+.word-being-narrated {
+    color: #FFF200; /* Signature Yellow */
+}
+
+/* Dynamic Override: If the active word is a number or money, make it green */
+.word-being-narrated.money-or-number {
+    color: #39FF14; /* Neon Green */
+}

@@ -1,0 +1,13 @@
+.word {
+    font-family: 'Montserrat', sans-serif; /* Ensure this is in your resources folder */
+    font-size: 85px;
+    font-weight: 900;
+    color: #FFFFFF;
+    text-transform: uppercase;
+    -webkit-text-stroke: 4px #000000;
+    filter: drop-shadow(0px 8px 0px rgba(0,0,0,0.8));
+}
+
+.word-being-narrated {
+    color: #FFF200;
+}

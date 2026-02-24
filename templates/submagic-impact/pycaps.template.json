@@ -1,0 +1,40 @@
+{
+    "css": "style.css",
+    "resources": "resources",
+    "layout": {
+        "x_words_space": 15,
+        "y_words_space": 10,
+        "max_number_of_lines": 1,
+        "min_number_of_lines": 1,
+        "vertical_align": {
+            "align": "center",
+            "offset": 0.1
+        }
+    },
+    "whisper": {
+        "model": "base"
+    },
+    "splitters": [
+        {
+            "type": "limit_by_chars",
+            "max_chars": 15
+        }
+    ],
+    "animations": [
+        {
+            "type": "pop_in",
+            "when": "narration-starts",
+            "what": "word",
+            "duration": 0.15
+        },
+        {
+            "type": "slide_in_primitive",
+            "when": "narration-starts",
+            "what": "segment",
+            "duration": 0.3,
+            "direction": "up",
+            "distance": 30
+        }
+    ],
+    "tagger_rules": []
+}

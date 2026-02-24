@@ -1,0 +1,57 @@
+{
+    "css": "styles.css",
+    "resources": "resources",
+    "layout": {
+        "max_number_of_lines": 2,
+        "min_number_of_lines": 1,
+        "vertical_align": {
+            "align": "top",
+            "offset": 0.65
+        }
+    },
+    "splitters": [
+        {
+            "type": "split_into_sentences"
+        },
+        {
+            "type": "limit_by_chars",
+            "min_chars": 10,
+            "max_chars": 20
+        }
+    ],
+    "effects": [
+        {
+            "type": "remove_punctuation_marks",
+            "punctuation_marks": ["."],
+            "exception_marks": ["..."]
+        },
+        {
+            "type": "emoji_in_segment",
+            "chance_to_apply": 0.85,
+            "align": "bottom",
+            "max_uses_of_each_emoji": 1
+        }
+    ],
+    "animations": [
+        {
+            "type": "pop_in_primitive",
+            "when": "narration-starts",
+            "what": "word",
+            "duration": 0.15,
+            "delay": 0,
+            "min_scale": 0.9,
+            "init_scale": 0.95,
+            "min_scale_at": 0.5,
+            "overshoot": {
+                "amount": 0.05,
+                "peak_at": 0.8
+            }
+        },
+        {
+            "type": "fade_out",
+            "when": "narration-ends",
+            "what": "segment"
+        }
+    ],
+    "tagger_rules": []
+}
