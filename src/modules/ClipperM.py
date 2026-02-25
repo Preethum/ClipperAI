@@ -70,6 +70,7 @@ DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "out", "01_clips")
 DEFAULT_MIN_CLIP_DURATION = 45.0  # Minimum length of a clip in seconds
 DEFAULT_MAX_CLIP_DURATION = 90.0  # Maximum length of a clip in seconds
 DEFAULT_MAX_TOTAL_CLIPS = 40       # Maximum number of total clips you want the pipeline to output
+DEFAULT_DEDUPLICATION_THRESHOLD = 0.6  # Default IoU threshold for deduplication
 
 # Runtime configuration (will be set by main function)
 VIDEO_PATH = DEFAULT_VIDEO_PATH
@@ -92,7 +93,8 @@ def initialize_client():
     client = OpenAI(base_url=LM_STUDIO_URL, api_key="lm-studio", timeout=None)
 initialize_client()
 def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model=None, 
-         editor_model=None, min_clip_duration=None, max_clip_duration=None, max_total_clips=None):
+         editor_model=None, min_clip_duration=None, max_clip_duration=None, max_total_clips=None, viral_archetypes=None, 
+         scout_system_instruction=None, scout_user_prompt=None, deduplication_threshold=None):
     """
     Main function to run the clipper with custom configuration.
     
@@ -111,6 +113,7 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
     """
     global VIDEO_PATH, LM_STUDIO_URL, SCOUT_MODEL, EDITOR_MODEL, OUTPUT_DIR
     global MIN_CLIP_DURATION, MAX_CLIP_DURATION, MAX_TOTAL_CLIPS, client
+    global SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, DEDUPLICATION_THRESHOLD
     
     # Update configuration
     VIDEO_PATH = input_video_path or DEFAULT_VIDEO_PATH
@@ -121,6 +124,9 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
     MIN_CLIP_DURATION = min_clip_duration or DEFAULT_MIN_CLIP_DURATION
     MAX_CLIP_DURATION = max_clip_duration or DEFAULT_MAX_CLIP_DURATION
     MAX_TOTAL_CLIPS = max_total_clips or DEFAULT_MAX_TOTAL_CLIPS
+    SCOUT_SYSTEM_INSTRUCTION = scout_system_instruction
+    SCOUT_USER_PROMPT = scout_user_prompt
+    DEDUPLICATION_THRESHOLD = deduplication_threshold or DEFAULT_DEDUPLICATION_THRESHOLD
     
     # Initialize client with new URL
     initialize_client()
@@ -130,9 +136,9 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
         os.makedirs(OUTPUT_DIR)
     
     # Run the clipper logic
-    return _run_clipper_logic()
+    return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT)
 
-def _run_clipper_logic():
+def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None):
     """Execute the core clipper logic with current global configuration."""
     import cv2
     import easyocr
@@ -181,7 +187,8 @@ def _run_clipper_logic():
         print(f"[PASS 1] Scouting {window_label}...")
         
         found = pass_1_scout(chunk_t, chunk_o, window_label, prev_ctx=previous_context, 
-                           up_ctx=upcoming_context, min_dur=MIN_CLIP_DURATION, max_dur=MAX_CLIP_DURATION)
+                           up_ctx=upcoming_context, min_dur=MIN_CLIP_DURATION, max_dur=MAX_CLIP_DURATION,
+                           system_instruction=scout_system_instruction, user_prompt=scout_user_prompt)
         
         if found: 
             print(f"  -> LLM returned {len(found)} potential clips. Validating...")
@@ -214,9 +221,11 @@ def _run_clipper_logic():
                 except Exception as ex: 
                     print(f"  -> [REJECTED] Missing or bad timestamps: {ex}")
     
+   
+    
     # 4. Deduplication
-    print(f"\n Deduplicating {len(raw_candidate_pool)} raw candidates...")
-    clean_candidate_pool = deduplicate_clips(raw_candidate_pool, threshold=0.6)
+    print(f"\n Deduplicating {len(raw_candidate_pool)} raw candidates running CLipperM...")
+    clean_candidate_pool = deduplicate_clips(raw_candidate_pool, threshold=DEDUPLICATION_THRESHOLD)
     print(f"Reduced to {len(clean_candidate_pool)} unique candidates.")
     
     # 5. Pass 2: Editor Final Selection
@@ -231,7 +240,7 @@ def _run_clipper_logic():
             for i, selected_clip in enumerate(final_clips):
                 try:
                     target_id = selected_clip.get('clip_id')
-                    original_clip_data = next((c for c in clean_candidate_pool if c.get('clip_id') == target_id), None)
+                    original_clip_data = next((c for c in raw_candidate_pool if c.get('clip_id') == target_id), None)
                     
                     if not original_clip_data:
                         print(f"[ERROR] LLM Hallucinated ID: {target_id}")
@@ -326,13 +335,37 @@ def snap_timestamp_to_transcript(anchor_text, target_time, full_transcript, is_e
     return target_time 
 
 def get_safe_json(raw_response):
+    print(f"[DEBUG] get_safe_json called with response length: {len(raw_response)}")
     try:
-        clean_text = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL)
+        print(f"[DEBUG] Raw LLM response:\n{raw_response}\n{'='*50}")
+        
+        clean_text = re.sub(r'</think>.*?</think>', '', raw_response, flags=re.DOTALL)
         clean_text = re.sub(r'```json|```', '', clean_text, flags=re.IGNORECASE).strip()
+        print(f"[DEBUG] After removing thinking blocks:\n{clean_text}")
+        
         match = re.search(r'\[.*\]', clean_text, re.DOTALL)
-        if match: clean_text = match.group(0)
-        return json_repair.loads(clean_text)
-    except: return None
+        if match: 
+            clean_text = match.group(0)
+            print(f"[DEBUG] Extracted JSON array:\n{clean_text}")
+        else:
+            print(f"[DEBUG] No JSON array found in response")
+            return None
+        
+        print(f"[DEBUG] Attempting to parse JSON...")
+        
+        try:
+            parsed_json = json_repair.loads(clean_text)
+            print(f"[DEBUG] Successfully parsed JSON: {parsed_json}")
+            return parsed_json
+        except json.JSONDecodeError as e:
+            print(f"[ERROR] JSON decode error: {e}")
+            print(f"[ERROR] Error position: Character {e.pos} in line {e.lineno}")
+            print(f"[DEBUG] Problematic text around error: ...{clean_text[max(0, e.pos-20):e.pos+20]}...")
+            return None
+    except Exception as e:
+        print(f"[ERROR] Unexpected error during JSON parsing: {e}")
+        print(f"[ERROR] Raw response: {raw_response}")
+        return None
 
 def format_time(seconds):
     mins, secs = divmod(int(seconds), 60)
@@ -408,6 +441,7 @@ def calculate_iou(clip1, clip2):
     return intersection / union if union > 0 else 0
 
 def deduplicate_clips(candidates, threshold=0.6):
+    print(f"\n Deduplicating {len(candidates)} threshold={threshold} raw candidates...")
     sorted_cands = sorted(candidates, key=lambda x: x.get('hybrid_score', 0), reverse=True)
     unique_clips = []
     for c in sorted_cands:
@@ -485,85 +519,116 @@ def get_ocr_list(video_path, reader):
     return ocr_data
 
 # --- PASS 1: THE SCOUT ---
-def pass_1_scout(transcript_chunk, ocr_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0):
-    system_instruction = (
-        "You are an Elite Narrative Architect and Viral Content Editor. Your mission is to extract 'Golden Moments'—high-retention, high-density short-form stories.\n\n"
-        "### PHASE 1: THE VIRAL ANATOMY AUDIT\n"
-        "1. THE HOOK (0-3s): Must be a 'Pattern Interrupt'—a bold claim, high energy, or a visual shift.\n"
-        "2. INFORMATION DENSITY: Prioritize high-pace, high-energy, highly emotional, or heavily debatable dialogue.\n"
-        "3. THE PAYOFF: The clip MUST end with a satisfying punchline, reveal, or reaction. Never cut off the 'Result'.\n\n"
-        "### PHASE 2: DURATION STRICTNESS (CRITICAL RULE)\n"
-        f"4. DURATION: Clips MUST be strictly between {min_dur} and {max_dur} seconds.\n"
-        f"5. THE 'CONTEXT PADDING' RULE: If a funny punchline or reaction is only 10 seconds long, you MUST include the context leading up to it to hit the {min_dur}-second minimum.\n\n"
-        "### PHASE 3: CONTEXTUAL BLEED OVER & DEDUPLICATION (NEW)\n"
-        "6. THE BLEED RULE: You are provided with 'PREVIOUS CONTEXT' and 'UPCOMING CONTEXT'. If a story arc or joke begins in the previous context or bleeds into the upcoming context, you ARE ALLOWED to use those timestamps to ensure the clip is complete. Our backend system will automatically deduplicate any overlapping clips.\n\n"
-        "### PHASE 4: TEMPORAL PRECISION & ANCHORS\n"
-        "7. SAFE ENTRY: Start 0.3s before the first word to catch the breath.\n"
-        "8. OCR-SNAP EXIT: Cross-reference OCR. If a 'Scene Change' happens within 1.0s of the final word, SNAP the end_padding to that exact transition.\n"
-        "9. ANCHOR TEXT: You must provide EXACTLY the first 4 words and EXACTLY the last 4 words of the clip.\n\n"
-        "### PHASE 5: DYNAMIC EXTRACTION (QUALITY OVER QUANTITY)\n"
-        "10. EXTRACTION LIMIT: There is NO limit. If the current transcript has 4 highly debatable moments, extract all 4. \n"
-        "11. THE 'SKIP' RULE: If the transcript is boring, logistical, or lacks a satisfying payoff, DO NOT force a clip. Output an empty JSON array [].\n\n"
-        "### PHASE 6: CHAIN OF THOUGHT\n"
-        f"Your <think> block MUST explicitly calculate: End_Time - Start_Time = Duration. If the Duration is less than {min_dur} seconds, you must rewrite the clip to include more setup.\n"
-        "Output ONLY the <think> block followed immediately by the raw JSON array. Do not output any other text."
+def pass_1_scout(transcript_chunk, ocr_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0, system_instruction=None, user_prompt=None):
+    if system_instruction is None:
+        print("Using default system instruction")
+        system_instruction = (
+            "You are an Elite Narrative Architect and Viral Content Editor. Your mission is to extract 'Golden Moments'—high-retention, high-density short-form stories.\n\n"
+            "### PHASE 1: THE VIRAL ANATOMY AUDIT\n"
+            "1. THE HOOK (0-3s): Must be a 'Pattern Interrupt'—a bold claim, high energy, or a visual shift.\n"
+            "2. INFORMATION DENSITY: Prioritize high-pace, high-energy, highly emotional, or heavily debatable dialogue.\n"
+            "3. THE PAYOFF: The clip MUST end with a satisfying punchline, reveal, or reaction. Never cut off the 'Result'.\n\n"
+            "### PHASE 2: DURATION STRICTNESS (CRITICAL RULE)\n"
+            f"4. DURATION: Clips MUST be strictly between {min_dur} and {max_dur} seconds.\n"
+            f"5. THE 'CONTEXT PADDING' RULE: If a funny punchline or reaction is only 10 seconds long, you MUST include the context leading up to it to hit the {min_dur}-second minimum.\n\n"
+            "### PHASE 3: CONTEXTUAL BLEED OVER & DEDUPLICATION (NEW)\n"
+            "6. THE BLEED RULE: You are provided with 'PREVIOUS CONTEXT' and 'UPCOMING CONTEXT'. If a story arc or joke begins in the previous context or bleeds into the upcoming context, you ARE ALLOWED to use those timestamps to ensure the clip is complete. Our backend system will automatically deduplicate any overlapping clips.\n\n"
+            "### PHASE 4: TEMPORAL PRECISION & ANCHORS\n"
+            "7. SAFE ENTRY: Start 0.3s before the first word to catch the breath.\n"
+            "8. OCR-SNAP EXIT: Cross-reference OCR. If a 'Scene Change' happens within 1.0s of the final word, SNAP the end_padding to that exact transition.\n"
+            "9. ANCHOR TEXT: You must provide EXACTLY the first 4 words and EXACTLY the last 4 words of the clip.\n\n"
+            "### PHASE 5: DYNAMIC EXTRACTION (QUALITY OVER QUANTITY)\n"
+            "10. EXTRACTION LIMIT: There is NO limit. If the current transcript has 4 highly debatable moments, extract all 4. \n"
+            "11. THE 'SKIP' RULE: If the transcript is boring, logistical, or lacks a satisfying payoff, DO NOT force a clip. Output an empty JSON array [].\n\n"
+            "### PHASE 6: CHAIN OF THOUGHT\n"
+            f"Your <think> block MUST explicitly calculate: End_Time - Start_Time = Duration. If the Duration is less than {min_dur} seconds, you must rewrite the clip to include more setup.\n"
+            "Output ONLY the <think> block followed immediately by the raw JSON array. Do not output any other text."
+        )
+    
+    if user_prompt is None:
+        print("Using default user prompt")
+        user_prompt = (
+            f"DATASET ANALYSIS ({window_label}):\n\n"
+            f"--- PREVIOUS CONTEXT (What happened just before this chunk) ---\n{prev_ctx}\n\n"
+            f"--- CURRENT CHAPTER (Main focus area) ---\n{transcript_chunk}\n\n"
+            f"--- UPCOMING CONTEXT (What happens right after this chunk) ---\n{up_ctx}\n\n"
+            f"--- FULL CONTEXT OCR (Visual Scene Transitions) ---\n{ocr_chunk}\n\n"
+            "INSTRUCTIONS:\n"
+            "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
+            "[\n"
+            "  {\n"
+            "    \"clip_title\": \"Hook-driven title for the clip\",\n"
+            "    \"start\": 0.0,\n"
+            "    \"end\": 0.0,\n"
+            f"    \"duration_check\": \"Calculate: End - Start. State the total seconds. MUST be {min_dur}-{max_dur}s.\",\n"
+            "    \"anchor_start_text\": \"first four words exactly\",\n"
+            "    \"anchor_end_text\": \"last four words exactly\",\n"
+            "    \"padding\": {\"start_buffer\": 0.3, \"end_buffer\": 1.5},\n"
+            "    \"temporal_math\": \"Detailed calculation of the padding chosen.\",\n"
+            "    \"context_check\": \"Explanation of why this clip makes sense standalone.\",\n"
+            "    \"virality_metrics\": {\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85},\n"
+            "    \"reasoning\": \"Why this moment will perform well on TikTok/Reels.\"\n"
+            "  }\n"
+            "]"
+        )
+    
+    # Format prompts with actual values
+    formatted_system = system_instruction.format(
+        min_dur=min_dur, max_dur=max_dur, window_label=window_label,
+        prev_ctx=prev_ctx, transcript_chunk=transcript_chunk, up_ctx=up_ctx, ocr_chunk=ocr_chunk
     )
-
-    user_prompt = (
-        f"DATASET ANALYSIS ({window_label}):\n\n"
-        f"--- PREVIOUS CONTEXT (What happened just before this chunk) ---\n{prev_ctx}\n\n"
-        f"--- CURRENT CHAPTER (Main focus area) ---\n{transcript_chunk}\n\n"
-        f"--- UPCOMING CONTEXT (What happens right after this chunk) ---\n{up_ctx}\n\n"
-        f"--- FULL CONTEXT OCR (Visual Scene Transitions) ---\n{ocr_chunk}\n\n"
-        "INSTRUCTIONS:\n"
-        "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
-        "[\n"
-        "  {\n"
-        "    \"clip_title\": \"Hook-driven title for the clip\",\n"
-        "    \"start\": 0.0,\n"
-        "    \"end\": 0.0,\n"
-        f"    \"duration_check\": \"Calculate: End - Start. State the total seconds. MUST be {min_dur}-{max_dur}s.\",\n"
-        "    \"anchor_start_text\": \"first four words exactly\",\n"
-        "    \"anchor_end_text\": \"last four words exactly\",\n"
-        "    \"padding\": {\"start_buffer\": 0.3, \"end_buffer\": 1.5},\n"
-        "    \"temporal_math\": \"Detailed calculation of the padding chosen.\",\n"
-        "    \"context_check\": \"Explanation of why this clip makes sense standalone.\",\n"
-        "    \"virality_metrics\": {\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85},\n"
-        "    \"reasoning\": \"Why this moment will perform well on TikTok/Reels.\"\n"
-        "  }\n"
-        "]"
+    formatted_user = user_prompt.format(
+        window_label=window_label, prev_ctx=prev_ctx, transcript_chunk=transcript_chunk, 
+        up_ctx=up_ctx, ocr_chunk=ocr_chunk, min_dur=min_dur, max_dur=max_dur
     )
+    
+    # Debug: Show formatted prompts
+    print(f"\n[DEBUG] Formatted System Prompt:\n{formatted_system}\n")
+    print(f"\n[DEBUG] Formatted User Prompt:\n{formatted_user}\n")
     
     response = client.chat.completions.create(
         model=SCOUT_MODEL, 
-        messages=[{"role": "system", "content": system_instruction}, {"role": "user", "content": user_prompt}],
+        messages=[{"role": "system", "content": formatted_system}, {"role": "user", "content": formatted_user}],
         temperature=0.2 
     )
     
+    print()
     raw_output = response.choices[0].message.content
     print(f"\n--- RAW LLM OUTPUT ---\n{raw_output}\n----------------------\n")
     return get_safe_json(raw_output)
 
 # --- PASS 2: THE EDITOR (BATCHED) ---
-def pass_2_editor(candidate_pool, max_limit=5):
+def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None):
     if not candidate_pool:
         print("[ERROR] Candidate pool is empty. Skipping Pass 2.")
         return []
 
+    # Default viral archetypes if none provided
+    if viral_archetypes is None:
+        viral_archetypes = [
+            "High-Stakes Challenge",
+            "Mind-Blowing Fact", 
+            "Hilarious/Raw Reaction",
+            "Hot Take / Debate",
+            "Satisfying Process"
+        ]
+
     system_instruction = (
-        "You are the Lead Short-Form Content Strategist for a massive YouTube channel. Your mission is to curate an elite 'Viral Batch' from a pool of candidates.\n\n"
+        f"You are a Lead Short-Form Content Strategist for a massive YouTube channel. Your mission is to curate an elite 'Viral Batch' from a pool of candidates.\n\n"
         "### STRATEGIC SELECTION RULES:\n"
         "1. THE DIVERSITY MANDATE: Do not pick multiple clips covering the exact same story beat. Curate a mix of proven 'Viral Archetypes':\n"
-        "   - The 'High-Stakes Challenge' (Immediate danger/action)\n"
-        "   - The 'Mind-Blowing Fact' (High educational/insight value)\n"
-        "   - The 'Hilarious/Raw Reaction' (Pure emotion/humor)\n"
-        "   - The 'Hot Take / Debate' (Highly controversial, prompts heavy comments)\n"
-        "   - The 'Satisfying Process' (A clear beginning, middle, and result)\n"
+    )
+    
+    # Add viral archetypes from configuration
+    for archetype in viral_archetypes:
+        system_instruction += f"   - '{archetype}'\n"
+    
+    system_instruction += (
         "2. THE ENGAGEMENT TRIGGER: Prioritize clips that force a user behavior. Will they share this with a friend? Will they angrily comment to disagree? Will they re-watch it because it loops perfectly?\n"
         "3. LOGICAL COMPLETENESS: Reject any clip that feels like 'the middle of a thought'.\n\n"
         "### OUTPUT CONSTRAINTS (QUALITY OVER QUANTITY):\n"
-        f"- THE STRICT GATEKEEPER RULE: There is NO quota. You may select 1, 10, or 0 clips. ONLY select candidates that have a 90+ retention potential and a clear engagement trigger. Discard the rest. Never output more than {max_limit} total.\n"
-        "- Titles must be punchy 'Hook Text' designed to be plastered on the center of the video (Max 6 words).\n"
+        f"- THE BALANCED GATEKEEPER RULE: Select clips with 75+ retention potential and a clear engagement trigger. Aim for quality but be more generous to provide variety. Never output more than {max_limit} total.\n"
+        "- Titles must be punchy 'Hook Text' designed to be plastered on center of the video (Max 6 words).\n"
         "- Output ONLY raw JSON. No markdown blocks, no preamble."
     )
     
@@ -669,7 +734,9 @@ if __name__ == "__main__":
         print(f"[PASS 1] Scouting {window_label}...")
         
         # Inject our precise contexts and min/max variables into Pass 1
-        found = pass_1_scout(chunk_t, chunk_o, window_label, prev_ctx=previous_context, up_ctx=upcoming_context, min_dur=MIN_CLIP_DURATION, max_dur=MAX_CLIP_DURATION)
+        found = pass_1_scout(chunk_t, chunk_o, window_label, prev_ctx=previous_context, 
+                           up_ctx=upcoming_context, min_dur=MIN_CLIP_DURATION, max_dur=MAX_CLIP_DURATION,
+                           system_instruction=scout_system_instruction, user_prompt=scout_user_prompt)
         
         if found: 
             print(f"  -> LLM returned {len(found)} potential clips. Validating...")
@@ -702,24 +769,24 @@ if __name__ == "__main__":
                 except Exception as ex: 
                     print(f"  -> [REJECTED] Missing or bad timestamps in JSON: {ex}")
 
-    # 3. DEDUPLICATION
-    print(f"\n[LOG] Deduplicating {len(raw_candidate_pool)} raw candidates...")
-    clean_candidate_pool = deduplicate_clips(raw_candidate_pool, threshold=0.6)
-    print(f"[LOG] Reduced to {len(clean_candidate_pool)} unique candidates after IoU overlap check.")
-
-    # 4. PASS 2: Editor Final Selection
+    # 3. PASS 2: Editor Final Selection
     print("\n[PASS 2] Selecting Final Top Clips...")
-    final_clips = pass_2_editor(clean_candidate_pool, max_limit=MAX_TOTAL_CLIPS)
+    final_clips = pass_2_editor(raw_candidate_pool, max_limit=MAX_TOTAL_CLIPS)
+
+    # 4. DEDUPLICATION
+    print(f"\n[LOG] Deduplicating {len(final_clips)} selected clips using IoU threshold of {DEDUPLICATION_THRESHOLD}...")
+    clean_candidate_pool = deduplicate_clips(final_clips, DEDUPLICATION_THRESHOLD)
+    print(f"[LOG] Reduced to {len(clean_candidate_pool)} unique final clips.")
 
     # 5. Export Standard Trims & Meta Data (Using MoviePy as requested)
     exported_clips_metadata = []
 
-    if final_clips:
+    if clean_candidate_pool:
         with VideoFileClip(VIDEO_PATH) as video:
-            for i, selected_clip in enumerate(final_clips):
+            for i, selected_clip in enumerate(clean_candidate_pool):
                 try:
                     target_id = selected_clip.get('clip_id')
-                    original_clip_data = next((c for c in clean_candidate_pool if c.get('clip_id') == target_id), None)
+                    original_clip_data = next((c for c in raw_candidate_pool if c.get('clip_id') == target_id), None)
                     
                     if not original_clip_data:
                         print(f"[ERROR] LLM Hallucinated ID: {target_id}")

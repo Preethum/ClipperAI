@@ -1,26 +1,26 @@
 """
-Podcast scenario configuration and interface.
-This file uses global functions from global_functions.py and holds all podcast-specific configurations.
+TikTok scenario configuration and interface.
+This file uses global functions from global_functions.py and holds all TikTok-specific configurations.
 """
 
 import os
 import json
 from global_functions import run_complete_pipeline
 
-def get_podcast_config():
-    """Get default configuration for podcast processing."""
+def get_tiktok_config():
+    """Get default configuration for TikTok processing."""
     return {
         # Input/Output paths
         "input_video": "source.mp4",
-        "base_output_dir": "output",
+        "base_output_dir": "tiktok_output",
         
         # Module configuration
         "modules": {
             "clipper": {
                 "enabled": True,
-                "min_clip_duration": 45.0,
-                "max_clip_duration": 90.0,
-                "max_total_clips": 10,
+                "min_clip_duration": 15.0,  # Shorter clips for TikTok
+                "max_clip_duration": 60.0,
+                "max_total_clips": 20,  # More clips for TikTok
                 
                 # ClipperM accepted parameters
                 "scout_model": "deepseek-r1-distill-qwen-32b",
@@ -30,26 +30,28 @@ def get_podcast_config():
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
                 
-                # Viral archetypes for strategic selection
+                # Viral archetypes for strategic selection - TikTok optimized
                 "viral_archetypes": [
                     "High-Stakes Challenge",
                     "Mind-Blowing Fact", 
                     "Hilarious/Raw Reaction",
                     "Hot Take / Debate",
-                    "Satisfying Process"
+                    "Satisfying Process",
+                    "Quick Tip / Life Hack",  # TikTok specific
+                    "Dance / Trend Related"   # TikTok specific
                 ],
                 
-                # Custom LLM prompts for this scenario
+                # Custom LLM prompts adapted for TikTok
                 "scout_system_instruction": (
-                    "You are an Elite Narrative Architect and Viral Content Editor. Your mission is to extract 'Golden Moments'—high-retention, high-density short-form stories.\n\n"
+                    "You are an Elite Narrative Architect and TikTok Viral Content Editor. Your mission is to extract 'Golden Moments'—high-retention, fast-paced, high-density short-form stories.\n\n"
                     "### PHASE 1: THE VIRAL ANATOMY AUDIT\n"
-                    "1. THE HOOK (0-3s): Must be a 'Pattern Interrupt'—a bold claim, high energy, or a visual shift.\n"
-                    "2. INFORMATION DENSITY: Prioritize high-pace, high-energy, highly emotional, or heavily debatable dialogue.\n"
+                    "1. THE HOOK (0-2s): Must be an aggressive 'Pattern Interrupt'—a bold claim, high energy, or a visual shift.\n"
+                    "2. INFORMATION DENSITY: Prioritize rapid-fire pacing, high-energy, highly emotional, or heavily debatable dialogue.\n"
                     "3. THE PAYOFF: The clip MUST end with a satisfying punchline, reveal, or reaction. Never cut off the 'Result'.\n\n"
                     "### PHASE 2: DURATION STRICTNESS (CRITICAL RULE)\n"
-                    "4. DURATION: Clips MUST be strictly between {min_dur} and {max_dur} seconds.\n"
-                    "5. THE 'CONTEXT PADDING' RULE: If a funny punchline or reaction is only 10 seconds long, you MUST include the context leading up to it to hit the {min_dur}-second minimum.\n\n"
-                    "### PHASE 3: CONTEXTUAL BLEED OVER & DEDUPLICATION (NEW)\n"
+                    "4. DURATION: Clips MUST be strictly between {min_dur} and {max_dur} seconds. Keep them as punchy as possible.\n"
+                    "5. THE 'CONTEXT PADDING' RULE: If a funny punchline or reaction is very short, you MUST include the context leading up to it to hit the {min_dur}-second minimum.\n\n"
+                    "### PHASE 3: CONTEXTUAL BLEED OVER & DEDUPLICATION\n"
                     "6. THE BLEED RULE: You are provided with 'PREVIOUS CONTEXT' and 'UPCOMING CONTEXT'. If a story arc or joke begins in the previous context or bleeds into the upcoming context, you ARE ALLOWED to use those timestamps to ensure the clip is complete. Our backend system will automatically deduplicate any overlapping clips.\n\n"
                     "### PHASE 4: TEMPORAL PRECISION & ANCHORS\n"
                     "7. SAFE ENTRY: Start 0.3s before the first word to catch the breath.\n"
@@ -72,30 +74,30 @@ def get_podcast_config():
                     "INSTRUCTIONS:\n"
                     "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
                     "[\n"
-                    "  {{\n" # <-- DOUBLED HERE
+                    "  {{\n"
                     "    \"clip_title\": \"Hook-driven title for the clip\",\n"
                     "    \"start\": 0.0,\n"
                     "    \"end\": 0.0,\n"
                     "    \"duration_check\": \"Calculate: End - Start. State the total seconds. MUST be {min_dur}-{max_dur}s.\",\n"
                     "    \"anchor_start_text\": \"first four words exactly\",\n"
                     "    \"anchor_end_text\": \"last four words exactly\",\n"
-                    "    \"padding\": {{\"start_buffer\": 0.3, \"end_buffer\": 1.5}},\n" # <-- DOUBLED HERE
+                    "    \"padding\": {{\"start_buffer\": 0.3, \"end_buffer\": 1.5}},\n"
                     "    \"temporal_math\": \"Detailed calculation of the padding chosen.\",\n"
                     "    \"context_check\": \"Explanation of why this clip makes sense standalone.\",\n"
-                    "    \"virality_metrics\": {{\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85}},\n" # <-- DOUBLED HERE
-                    "    \"reasoning\": \"Why this moment will perform well on TikTok/Reels.\"\n"
-                    "  }}\n" # <-- DOUBLED HERE
+                    "    \"virality_metrics\": {{\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85}},\n"
+                    "    \"reasoning\": \"Why this moment will perform well on TikTok.\"\n"
+                    "  }}\n"
                     "]"
                 )
             },
             "cropper": {
                 "enabled": True,
                 
-                # CropperM accepted parameters
-                "ratio": "9:16",
-                "quality": "balanced",
-                "crf": None,
-                "preset": None,
+                # CropperM accepted parameters - TikTok optimized
+                "ratio": "9:16",  # Vertical format for TikTok
+                "quality": "high",  # Higher quality for TikTok
+                "crf": 20,
+                "preset": "slow",
                 "plan_only": False,
                 "frame_skip": 0,
                 "downscale": 0,
@@ -104,11 +106,11 @@ def get_podcast_config():
             "subs": {
                 "enabled": True,
                 
-                # SubsM accepted parameters
-                "template": "templates/hype",
-                "vertical_align_offset": 0.70,
-                "max_width_ratio": 0.9,
-                "max_lines": 2
+                # SubsM accepted parameters - TikTok optimized
+                "template": "templates/explosive",  # More dynamic template
+                "vertical_align_offset": 0.75,  # Lower positioning for TikTok
+                "max_width_ratio": 0.85,  # Slightly narrower for mobile
+                "max_lines": 2  # Allow more lines for TikTok
             }
         },
         
@@ -116,15 +118,15 @@ def get_podcast_config():
         "cleanup_temp": True,
         "preserve_intermediate": False,
         
-        # Global Scenario Settings
-        "scenario_name": "podcast",
-        "target_platform": "youtube_shorts",
-        "content_style": "educational_entertainment"
+        # Global TikTok Scenario Settings
+        "scenario_name": "tiktok",
+        "target_platform": "tiktok",
+        "content_style": "viral_entertainment"
     }
 
 def main(config_file=None):
     """
-    Main function to run the podcast scenario.
+    Main function to run the TikTok scenario.
     
     Args:
         config_file (str): Path to JSON configuration file. If None, uses default config.
@@ -133,12 +135,12 @@ def main(config_file=None):
     if config_file and os.path.exists(config_file):
         with open(config_file, 'r') as f:
             config = json.load(f)
-        print(f" Loaded configuration from: {config_file}")
+        print(f"📋 Loaded configuration from: {config_file}")
     else:
-        config = get_podcast_config()
-        print(" Using default podcast configuration")
+        config = get_tiktok_config()
+        print("📋 Using default TikTok configuration")
     
-    print(f" Input video: {config.get('input_video', 'Not specified')}")
+    print(f"📹 Input video: {config.get('input_video', 'Not specified')}")
     
     # Run complete pipeline using global functions
     return run_complete_pipeline(config)
@@ -146,11 +148,11 @@ def main(config_file=None):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Podcast Video Processing Pipeline")
+    parser = argparse.ArgumentParser(description="TikTok Video Processing Pipeline")
     parser.add_argument('--config', type=str, help="Path to JSON configuration file")
     parser.add_argument('--input', type=str, help="Input video file path")
     parser.add_argument('--output', type=str, help="Output directory path")
-    parser.add_argument('--clips', type=int, default=10, help="Maximum number of clips to generate")
+    parser.add_argument('--clips', type=int, default=20, help="Maximum number of clips to generate")
     
     args = parser.parse_args()
     
@@ -159,7 +161,7 @@ if __name__ == "__main__":
         with open(args.config, 'r') as f:
             config = json.load(f)
     else:
-        config = get_podcast_config()
+        config = get_tiktok_config()
         
         # Override with command line arguments
         if args.input:
@@ -173,4 +175,4 @@ if __name__ == "__main__":
     # Run scenario using global functions
     final_clips = run_complete_pipeline(config)
     
-    print(f"\n✅ Processing complete! Generated {len(final_clips)} final videos.")
+    print(f"\n✅ TikTok processing complete! Generated {len(final_clips)} final videos.")
