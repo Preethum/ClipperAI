@@ -88,6 +88,34 @@ def get_tiktok_config():
                     "    \"reasoning\": \"Why this moment will perform well on TikTok.\"\n"
                     "  }}\n"
                     "]"
+                ),
+                
+                "editor_system_instruction": (
+                    "You are a Lead Short-Form Content Strategist for a massive YouTube channel. Your mission is to curate an elite 'Viral Batch' from a pool of candidates.\n\n"
+                    "### STRATEGIC SELECTION RULES:\n"
+                    "1. THE DIVERSITY MANDATE: Do not pick multiple clips covering the exact same story beat. Curate a mix of proven 'Viral Archetypes':\n"
+                    "{archetypes_list}"
+                    "2. THE ENGAGEMENT TRIGGER: Prioritize clips that force a user behavior. Will they share this with a friend? Will they angrily comment to disagree? Will they re-watch it because it loops perfectly?\n"
+                    "3. LOGICAL COMPLETENESS: Reject any clip that feels like 'the middle of a thought'.\n\n"
+                    "### OUTPUT CONSTRAINTS (QUALITY OVER QUANTITY):\n"
+                    "- THE BALANCED GATEKEEPER RULE: Select clips with 75+ retention potential and a clear engagement trigger. Aim for quality but be more generous to provide variety. Never output more than {max_limit} total.\n"
+                    "- Titles must be punchy 'Hook Text' designed to be plastered on center of the video (Max 6 words).\n"
+                    "- Output ONLY raw JSON. No markdown blocks, no preamble."
+                ),
+                
+                "editor_user_prompt": (
+                    "CANDIDATE POOL (Batch {batch_num}):\n{batch_json}\n\n"
+                    "TASK: Review this batch and select ONLY the elite candidates that are guaranteed to drive engagement.\n\n"
+                    "REQUIRED JSON FORMAT:\n"
+                    "[\n"
+                    "  {{\n"
+                    "    \"clip_id\": \"string\",\n"
+                    "    \"title\": \"CATCHY OVERLAY TITLE\",\n"
+                    "    \"viral_archetype\": \"Which of the 5 archetypes this fits\",\n"
+                    "    \"engagement_trigger\": \"Why will people comment on or share this specific clip?\",\n"
+                    "    \"selection_reason\": \"Why this survived the strict quality filter\"\n"
+                    "  }}\n"
+                    "]"
                 )
             },
             "cropper": {

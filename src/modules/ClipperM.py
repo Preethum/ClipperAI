@@ -7,7 +7,7 @@ import re
 import difflib
 import requests
 import numpy as np
-from openai import OpenAI
+from lmstudio import Client
 from faster_whisper import WhisperModel
 from tqdm import tqdm 
 from moviepy.video.io.VideoFileClip import VideoFileClip
@@ -88,13 +88,28 @@ client = None
 
 
 def initialize_client():
-    """Initialize the OpenAI client with current LM_STUDIO_URL."""
+    """Initialize the LM Studio client with current LM_STUDIO_URL."""
     global client
-    client = OpenAI(base_url=LM_STUDIO_URL, api_key="lm-studio", timeout=None)
+    host = LM_STUDIO_URL
+    if host.startswith("http://"):
+        host = host[7:]
+    elif host.startswith("https://"):
+        host = host[8:]
+    elif host.startswith("ws://"):
+        host = host[5:]
+    elif host.startswith("wss://"):
+        host = host[6:]
+        
+    if host.endswith("/v1"):
+        host = host[:-3]
+    if host.endswith("/"):
+        host = host[:-1]
+    client = Client(api_host=host)
+
 initialize_client()
 def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model=None, 
          editor_model=None, min_clip_duration=None, max_clip_duration=None, max_total_clips=None, viral_archetypes=None, 
-         scout_system_instruction=None, scout_user_prompt=None, deduplication_threshold=None):
+         scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, deduplication_threshold=None):
     """
     Main function to run the clipper with custom configuration.
     
@@ -113,7 +128,7 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
     """
     global VIDEO_PATH, LM_STUDIO_URL, SCOUT_MODEL, EDITOR_MODEL, OUTPUT_DIR
     global MIN_CLIP_DURATION, MAX_CLIP_DURATION, MAX_TOTAL_CLIPS, client
-    global SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, DEDUPLICATION_THRESHOLD
+    global SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, DEDUPLICATION_THRESHOLD, VIRAL_ARCHETYPES
     
     # Update configuration
     VIDEO_PATH = input_video_path or DEFAULT_VIDEO_PATH
@@ -126,6 +141,9 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
     MAX_TOTAL_CLIPS = max_total_clips or DEFAULT_MAX_TOTAL_CLIPS
     SCOUT_SYSTEM_INSTRUCTION = scout_system_instruction
     SCOUT_USER_PROMPT = scout_user_prompt
+    EDITOR_SYSTEM_INSTRUCTION = editor_system_instruction
+    EDITOR_USER_PROMPT = editor_user_prompt
+    VIRAL_ARCHETYPES = viral_archetypes
     DEDUPLICATION_THRESHOLD = deduplication_threshold or DEFAULT_DEDUPLICATION_THRESHOLD
     
     # Initialize client with new URL
@@ -136,9 +154,9 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
         os.makedirs(OUTPUT_DIR)
     
     # Run the clipper logic
-    return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT)
+    return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, VIRAL_ARCHETYPES)
 
-def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None):
+def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, viral_archetypes=None):
     """Execute the core clipper logic with current global configuration."""
     import cv2
     import easyocr
@@ -230,7 +248,7 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None):
     
     # 5. Pass 2: Editor Final Selection
     print("\n Selecting Final Top Clips...")
-    final_clips = pass_2_editor(clean_candidate_pool, max_limit=MAX_TOTAL_CLIPS)
+    final_clips = pass_2_editor(clean_candidate_pool, max_limit=MAX_TOTAL_CLIPS, viral_archetypes=viral_archetypes, system_instruction=editor_system_instruction, user_prompt=editor_user_prompt)
     
     # 6. Export clips
     exported_clips = []
@@ -335,32 +353,32 @@ def snap_timestamp_to_transcript(anchor_text, target_time, full_transcript, is_e
     return target_time 
 
 def get_safe_json(raw_response):
-    print(f"[DEBUG] get_safe_json called with response length: {len(raw_response)}")
+    # print(f"[DEBUG] get_safe_json called with response length: {len(raw_response)}")
     try:
-        print(f"[DEBUG] Raw LLM response:\n{raw_response}\n{'='*50}")
+        # print(f"[DEBUG] Raw LLM response:\n{raw_response}\n{'='*50}")
         
         clean_text = re.sub(r'</think>.*?</think>', '', raw_response, flags=re.DOTALL)
         clean_text = re.sub(r'```json|```', '', clean_text, flags=re.IGNORECASE).strip()
-        print(f"[DEBUG] After removing thinking blocks:\n{clean_text}")
+        # print(f"[DEBUG] After removing thinking blocks:\n{clean_text}")
         
         match = re.search(r'\[.*\]', clean_text, re.DOTALL)
         if match: 
             clean_text = match.group(0)
-            print(f"[DEBUG] Extracted JSON array:\n{clean_text}")
+            # print(f"[DEBUG] Extracted JSON array:\n{clean_text}")
         else:
-            print(f"[DEBUG] No JSON array found in response")
+            # print(f"[DEBUG] No JSON array found in response")
             return None
         
-        print(f"[DEBUG] Attempting to parse JSON...")
+        # print(f"[DEBUG] Attempting to parse JSON...")
         
         try:
             parsed_json = json_repair.loads(clean_text)
-            print(f"[DEBUG] Successfully parsed JSON: {parsed_json}")
+            # print(f"[DEBUG] Successfully parsed JSON: {parsed_json}")
             return parsed_json
         except json.JSONDecodeError as e:
-            print(f"[ERROR] JSON decode error: {e}")
-            print(f"[ERROR] Error position: Character {e.pos} in line {e.lineno}")
-            print(f"[DEBUG] Problematic text around error: ...{clean_text[max(0, e.pos-20):e.pos+20]}...")
+            # print(f"[ERROR] JSON decode error: {e}")
+            # print(f"[ERROR] Error position: Character {e.pos} in line {e.lineno}")
+            # print(f"[DEBUG] Problematic text around error: ...{clean_text[max(0, e.pos-20):e.pos+20]}...")
             return None
     except Exception as e:
         print(f"[ERROR] Unexpected error during JSON parsing: {e}")
@@ -520,57 +538,9 @@ def get_ocr_list(video_path, reader):
 
 # --- PASS 1: THE SCOUT ---
 def pass_1_scout(transcript_chunk, ocr_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0, system_instruction=None, user_prompt=None):
-    if system_instruction is None:
-        print("Using default system instruction")
-        system_instruction = (
-            "You are an Elite Narrative Architect and Viral Content Editor. Your mission is to extract 'Golden Moments'—high-retention, high-density short-form stories.\n\n"
-            "### PHASE 1: THE VIRAL ANATOMY AUDIT\n"
-            "1. THE HOOK (0-3s): Must be a 'Pattern Interrupt'—a bold claim, high energy, or a visual shift.\n"
-            "2. INFORMATION DENSITY: Prioritize high-pace, high-energy, highly emotional, or heavily debatable dialogue.\n"
-            "3. THE PAYOFF: The clip MUST end with a satisfying punchline, reveal, or reaction. Never cut off the 'Result'.\n\n"
-            "### PHASE 2: DURATION STRICTNESS (CRITICAL RULE)\n"
-            f"4. DURATION: Clips MUST be strictly between {min_dur} and {max_dur} seconds.\n"
-            f"5. THE 'CONTEXT PADDING' RULE: If a funny punchline or reaction is only 10 seconds long, you MUST include the context leading up to it to hit the {min_dur}-second minimum.\n\n"
-            "### PHASE 3: CONTEXTUAL BLEED OVER & DEDUPLICATION (NEW)\n"
-            "6. THE BLEED RULE: You are provided with 'PREVIOUS CONTEXT' and 'UPCOMING CONTEXT'. If a story arc or joke begins in the previous context or bleeds into the upcoming context, you ARE ALLOWED to use those timestamps to ensure the clip is complete. Our backend system will automatically deduplicate any overlapping clips.\n\n"
-            "### PHASE 4: TEMPORAL PRECISION & ANCHORS\n"
-            "7. SAFE ENTRY: Start 0.3s before the first word to catch the breath.\n"
-            "8. OCR-SNAP EXIT: Cross-reference OCR. If a 'Scene Change' happens within 1.0s of the final word, SNAP the end_padding to that exact transition.\n"
-            "9. ANCHOR TEXT: You must provide EXACTLY the first 4 words and EXACTLY the last 4 words of the clip.\n\n"
-            "### PHASE 5: DYNAMIC EXTRACTION (QUALITY OVER QUANTITY)\n"
-            "10. EXTRACTION LIMIT: There is NO limit. If the current transcript has 4 highly debatable moments, extract all 4. \n"
-            "11. THE 'SKIP' RULE: If the transcript is boring, logistical, or lacks a satisfying payoff, DO NOT force a clip. Output an empty JSON array [].\n\n"
-            "### PHASE 6: CHAIN OF THOUGHT\n"
-            f"Your <think> block MUST explicitly calculate: End_Time - Start_Time = Duration. If the Duration is less than {min_dur} seconds, you must rewrite the clip to include more setup.\n"
-            "Output ONLY the <think> block followed immediately by the raw JSON array. Do not output any other text."
-        )
-    
-    if user_prompt is None:
-        print("Using default user prompt")
-        user_prompt = (
-            f"DATASET ANALYSIS ({window_label}):\n\n"
-            f"--- PREVIOUS CONTEXT (What happened just before this chunk) ---\n{prev_ctx}\n\n"
-            f"--- CURRENT CHAPTER (Main focus area) ---\n{transcript_chunk}\n\n"
-            f"--- UPCOMING CONTEXT (What happens right after this chunk) ---\n{up_ctx}\n\n"
-            f"--- FULL CONTEXT OCR (Visual Scene Transitions) ---\n{ocr_chunk}\n\n"
-            "INSTRUCTIONS:\n"
-            "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
-            "[\n"
-            "  {\n"
-            "    \"clip_title\": \"Hook-driven title for the clip\",\n"
-            "    \"start\": 0.0,\n"
-            "    \"end\": 0.0,\n"
-            f"    \"duration_check\": \"Calculate: End - Start. State the total seconds. MUST be {min_dur}-{max_dur}s.\",\n"
-            "    \"anchor_start_text\": \"first four words exactly\",\n"
-            "    \"anchor_end_text\": \"last four words exactly\",\n"
-            "    \"padding\": {\"start_buffer\": 0.3, \"end_buffer\": 1.5},\n"
-            "    \"temporal_math\": \"Detailed calculation of the padding chosen.\",\n"
-            "    \"context_check\": \"Explanation of why this clip makes sense standalone.\",\n"
-            "    \"virality_metrics\": {\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85},\n"
-            "    \"reasoning\": \"Why this moment will perform well on TikTok/Reels.\"\n"
-            "  }\n"
-            "]"
-        )
+    if not system_instruction or not user_prompt:
+        print("[ERROR] Missing required scenarios prompts for pass 1 scout. Returning [].")
+        return []
     
     # Format prompts with actual values
     formatted_system = system_instruction.format(
@@ -583,22 +553,27 @@ def pass_1_scout(transcript_chunk, ocr_chunk, window_label, prev_ctx="", up_ctx=
     )
     
     # Debug: Show formatted prompts
-    print(f"\n[DEBUG] Formatted System Prompt:\n{formatted_system}\n")
-    print(f"\n[DEBUG] Formatted User Prompt:\n{formatted_user}\n")
+    # print(f"\n[DEBUG] Formatted System Prompt:\n{formatted_system}\n")
+    # print(f"\n[DEBUG] Formatted User Prompt:\n{formatted_user}\n")
     
-    response = client.chat.completions.create(
-        model=SCOUT_MODEL, 
-        messages=[{"role": "system", "content": formatted_system}, {"role": "user", "content": formatted_user}],
-        temperature=0.2 
-    )
+    try:
+        model = client.llm.model(SCOUT_MODEL)
+        response = model.respond(
+            history={"messages": [{"role": "system", "content": formatted_system}, {"role": "user", "content": formatted_user}]},
+            config={"temperature": 0.2} 
+        )
+        
+        print()
+        raw_output = response.content
+    except Exception as e:
+        print(f"[ERROR] LLM Request failed: {e}")
+        return None
     
-    print()
-    raw_output = response.choices[0].message.content
     print(f"\n--- RAW LLM OUTPUT ---\n{raw_output}\n----------------------\n")
     return get_safe_json(raw_output)
 
 # --- PASS 2: THE EDITOR (BATCHED) ---
-def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None):
+def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None, system_instruction=None, user_prompt=None):
     if not candidate_pool:
         print("[ERROR] Candidate pool is empty. Skipping Pass 2.")
         return []
@@ -612,26 +587,16 @@ def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None):
             "Hot Take / Debate",
             "Satisfying Process"
         ]
-
-    system_instruction = (
-        f"You are a Lead Short-Form Content Strategist for a massive YouTube channel. Your mission is to curate an elite 'Viral Batch' from a pool of candidates.\n\n"
-        "### STRATEGIC SELECTION RULES:\n"
-        "1. THE DIVERSITY MANDATE: Do not pick multiple clips covering the exact same story beat. Curate a mix of proven 'Viral Archetypes':\n"
-    )
-    
-    # Add viral archetypes from configuration
+        
+    archetypes_list = ""
     for archetype in viral_archetypes:
-        system_instruction += f"   - '{archetype}'\n"
-    
-    system_instruction += (
-        "2. THE ENGAGEMENT TRIGGER: Prioritize clips that force a user behavior. Will they share this with a friend? Will they angrily comment to disagree? Will they re-watch it because it loops perfectly?\n"
-        "3. LOGICAL COMPLETENESS: Reject any clip that feels like 'the middle of a thought'.\n\n"
-        "### OUTPUT CONSTRAINTS (QUALITY OVER QUANTITY):\n"
-        f"- THE BALANCED GATEKEEPER RULE: Select clips with 75+ retention potential and a clear engagement trigger. Aim for quality but be more generous to provide variety. Never output more than {max_limit} total.\n"
-        "- Titles must be punchy 'Hook Text' designed to be plastered on center of the video (Max 6 words).\n"
-        "- Output ONLY raw JSON. No markdown blocks, no preamble."
-    )
-    
+        archetypes_list += f"   - '{archetype}'\n"
+        
+    formatted_system = system_instruction.format(
+        archetypes_list=archetypes_list,
+        max_limit=max_limit
+    ) if system_instruction else ""  # Fallback just in case
+
     final_elite_clips = []
     
     # Process in batches of 15 to protect context limits on large videos
@@ -649,29 +614,23 @@ def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None):
                 "energy_score": c.get("hybrid_score", 0) 
             })
 
-        user_prompt = (
-            f"CANDIDATE POOL (Batch {i//batch_size + 1}):\n{json.dumps(slim_pool, indent=2)}\n\n"
-            "TASK: Review this batch and select ONLY the elite candidates that are guaranteed to drive engagement.\n\n"
-            "REQUIRED JSON FORMAT:\n"
-            "[\n"
-            "  {\n"
-            "    \"clip_id\": \"string\",\n"
-            "    \"title\": \"CATCHY OVERLAY TITLE\",\n"
-            "    \"viral_archetype\": \"Which of the 5 archetypes this fits\",\n"
-            "    \"engagement_trigger\": \"Why will people comment on or share this specific clip?\",\n"
-            "    \"selection_reason\": \"Why this survived the strict quality filter\"\n"
-            "  }\n"
-            "]"
-        )
+        formatted_user = user_prompt.format(
+            batch_num=(i//batch_size + 1),
+            batch_json=json.dumps(slim_pool, indent=2)
+        ) if user_prompt else f"CANDIDATE POOL:\n{json.dumps(slim_pool, indent=2)}" # Fallback
         
         print(f"\n[LOG] Swapping models... Loading Editor Model for Batch {i//batch_size + 1}...")
-        response = client.chat.completions.create(
-            model=EDITOR_MODEL, 
-            messages=[{"role": "system", "content": system_instruction}, {"role": "user", "content": user_prompt}],
-            temperature=0.1
-        )
-        
-        batch_results = get_safe_json(response.choices[0].message.content)
+        try:
+            model = client.llm.model(EDITOR_MODEL)
+            response = model.respond(
+                history={"messages": [{"role": "system", "content": formatted_system}, {"role": "user", "content": formatted_user}]},
+                config={"temperature": 0.1}
+            )
+            
+            batch_results = get_safe_json(response.content)
+        except Exception as e:
+            print(f"[ERROR] Editor LLM Request failed: {e}")
+            batch_results = None
         if batch_results:
             final_elite_clips.extend(batch_results)
             
