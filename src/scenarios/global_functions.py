@@ -150,6 +150,8 @@ def run_clipper_module(input_video, output_dir, config):
             viral_archetypes=config.get("viral_archetypes"),
             scout_system_instruction=config.get("scout_system_instruction"),
             scout_user_prompt=config.get("scout_user_prompt"),
+            editor_system_instruction=config.get("editor_system_instruction"),
+            editor_user_prompt=config.get("editor_user_prompt"),
             deduplication_threshold=config.get("deduplication_threshold")
         )
         

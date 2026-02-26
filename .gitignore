@@ -5,3 +5,4 @@ __pycache__/
 *.exe
 *.pt
 *.pth
+.vscode/
