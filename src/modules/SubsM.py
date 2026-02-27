@@ -135,6 +135,67 @@ def _render_video(template_path: str, input_video: str, output_video: str) -> bo
         print(f"❌ Full traceback: {traceback.format_exc()}")
         return False
 
+def plan(source_video, manifest, config):
+    """Enrich manifest with word-level subtitle data for each clip (no video rendering)."""
+    import subprocess
+    import tempfile
+
+    template_path = config.get("template", "templates/default")
+    vertical_align_offset = config.get("vertical_align_offset", 0.70)
+    max_width_ratio = config.get("max_width_ratio", 0.9)
+    max_lines = config.get("max_lines", 1)
+    whisper_model = config.get("whisper_model", "base")
+    whisper_language = config.get("whisper_language", "en")
+
+    for i, clip in enumerate(manifest):
+        clip_start = clip["start"]
+        clip_end = clip["end"]
+        clip_duration = clip_end - clip_start
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                tmp_audio = tmp.name
+
+            subprocess.run([
+                'ffmpeg', '-y', '-ss', str(clip_start), '-t', str(clip_duration),
+                '-i', source_video, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000',
+                '-ac', '1', tmp_audio
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            from pycaps import WhisperAudioTranscriber
+            transcriber = WhisperAudioTranscriber(model_size=whisper_model, language=whisper_language)
+            document = transcriber.transcribe(tmp_audio)
+
+            words = []
+            for segment in document.segments:
+                for line in segment.lines:
+                    for word in line.words:
+                        words.append({
+                            "word": word.text,
+                            "start": round(clip_start + word.time.start, 3),
+                            "end": round(clip_start + word.time.end, 3)
+                        })
+
+            os.remove(tmp_audio)
+
+            clip["subs"] = {
+                "enabled": True,
+                "template": template_path,
+                "vertical_align_offset": vertical_align_offset,
+                "max_width_ratio": max_width_ratio,
+                "max_lines": max_lines,
+                "words": words
+            }
+
+            print(f"     [{i+1}/{len(manifest)}] {clip.get('title','?')[:40]}  ({len(words)} words)")
+
+        except Exception as e:
+            print(f"     [{i+1}/{len(manifest)}] ❌ {clip.get('title','?')[:40]}: {e}")
+            if 'tmp_audio' in locals() and os.path.exists(tmp_audio):
+                os.remove(tmp_audio)
+
+    return manifest
+
 def main(input_video_path: Optional[str] = None, output_video_path: Optional[str] = None, template_path: Optional[str] = None, 
          vertical_align_offset: float = 0.70, max_width_ratio: float = 0.9, max_lines: int = 1) -> bool:
     """Main function to run subtitle rendering with custom configuration."""

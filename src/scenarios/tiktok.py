@@ -31,7 +31,7 @@ def get_tiktok_config():
                 "enable_vision": True,
                 "vision_model": "qwen/qwen3-vl-30b",
                 "vision_interval": 2.0,
-                "vision_concurrency": 10,
+                "vision_concurrency": 6,
                 
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
@@ -130,24 +130,36 @@ def get_tiktok_config():
             "cropper": {
                 "enabled": True,
                 
-                # CropperM accepted parameters - TikTok optimized
+                # CropperM plan() parameters - TikTok optimized
                 "ratio": "9:16",  # Vertical format for TikTok
-                "quality": "high",  # Higher quality for TikTok
-                "crf": 20,
-                "preset": "slow",
-                "plan_only": False,
+                "quality": "high",
                 "frame_skip": 0,
                 "downscale": 0,
-                "encoder": "auto"
+                "encoder": "auto",
+                "crf": None,      # Use quality preset default
+                "preset": None    # Use quality preset default
             },
             "subs": {
                 "enabled": True,
                 
-                # SubsM accepted parameters - TikTok optimized
+                # SubsM plan() parameters - TikTok optimized
                 "template": "templates/hype",  # More dynamic template
                 "vertical_align_offset": 0.75,  # Lower positioning for TikTok
                 "max_width_ratio": 0.85,  # Slightly narrower for mobile
-                "max_lines": 2  # Allow more lines for TikTok
+                "max_lines": 2,  # Allow more lines for TikTok
+                
+                # Whisper transcription settings
+                "whisper_model": "base",  # tiny, base, small, medium, large
+                "whisper_language": "en"
+            },
+            "renderer": {
+                "enabled": True,
+                
+                # RendererM output encoding settings
+                "encoder": "auto",
+                "quality": "high",
+                "crf": 20,
+                "preset": "slow"
             }
         },
         
@@ -162,13 +174,7 @@ def get_tiktok_config():
     }
 
 def main(config_file=None):
-    """
-    Main function to run the TikTok scenario.
-    
-    Args:
-        config_file (str): Path to JSON configuration file. If None, uses default config.
-    """
-    # Load configuration
+    """Run the TikTok scenario."""
     if config_file and os.path.exists(config_file):
         with open(config_file, 'r') as f:
             config = json.load(f)
@@ -176,10 +182,7 @@ def main(config_file=None):
     else:
         config = get_tiktok_config()
         print("📋 Using default TikTok configuration")
-    
     print(f"📹 Input video: {config.get('input_video', 'Not specified')}")
-    
-    # Run complete pipeline using global functions
     return run_complete_pipeline(config)
 
 if __name__ == "__main__":

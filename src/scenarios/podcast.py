@@ -32,7 +32,7 @@ def get_podcast_config():
                 "enable_vision": True,
                 "vision_model": "qwen/qwen3-vl-30b",
                 "vision_interval": 2.0,
-                "vision_concurrency": 5
+                "vision_concurrency": 5,
                 
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
@@ -129,24 +129,36 @@ def get_podcast_config():
             "cropper": {
                 "enabled": True,
                 
-                # CropperM accepted parameters
+                # CropperM plan() parameters
                 "ratio": "9:16",
                 "quality": "balanced",
-                "crf": None,
-                "preset": None,
-                "plan_only": False,
                 "frame_skip": 0,
                 "downscale": 0,
-                "encoder": "auto"
+                "encoder": "auto",
+                "crf": None,      # Use quality preset default
+                "preset": None    # Use quality preset default
             },
             "subs": {
                 "enabled": True,
                 
-                # SubsM accepted parameters
+                # SubsM plan() parameters
                 "template": "templates/hype",
                 "vertical_align_offset": 0.70,
                 "max_width_ratio": 0.9,
-                "max_lines": 2
+                "max_lines": 2,
+                
+                # Whisper transcription settings
+                "whisper_model": "base",  # tiny, base, small, medium, large
+                "whisper_language": "en"
+            },
+            "renderer": {
+                "enabled": True,
+                
+                # RendererM output encoding settings
+                "encoder": "auto",
+                "quality": "balanced",
+                "crf": None,      # Use quality preset default
+                "preset": None    # Use quality preset default
             }
         },
         
@@ -161,13 +173,7 @@ def get_podcast_config():
     }
 
 def main(config_file=None):
-    """
-    Main function to run the podcast scenario.
-    
-    Args:
-        config_file (str): Path to JSON configuration file. If None, uses default config.
-    """
-    # Load configuration
+    """Run the podcast scenario."""
     if config_file and os.path.exists(config_file):
         with open(config_file, 'r') as f:
             config = json.load(f)
@@ -175,10 +181,7 @@ def main(config_file=None):
     else:
         config = get_podcast_config()
         print(" Using default podcast configuration")
-    
     print(f" Input video: {config.get('input_video', 'Not specified')}")
-    
-    # Run complete pipeline using global functions
     return run_complete_pipeline(config)
 
 if __name__ == "__main__":

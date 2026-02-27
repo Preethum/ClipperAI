@@ -436,6 +436,96 @@ def build_encoder_args(encoder_type, quality_level, crf_override=None, preset_ov
 
     return args
 
+def plan(source_video, manifest, config):
+    """Enrich manifest with crop planning data for each clip (no video rendering).
+    
+    Runs scene detection + YOLO analysis on each clip's segment of the source video
+    and adds a "crop" key to each manifest entry with per-scene strategy info.
+    
+    Returns the enriched manifest.
+    """
+    import cv2
+
+    ratio_str = config.get("ratio", "9:16")
+    try:
+        rw, rh = ratio_str.split(':')
+        aspect_ratio = int(rw) / int(rh)
+    except (ValueError, IndexError, ZeroDivisionError):
+        print(f"❌ Invalid aspect ratio '{ratio_str}', defaulting to 9:16")
+        aspect_ratio = 9 / 16
+
+    frame_skip = config.get("frame_skip", 0)
+    downscale = config.get("downscale", 0)
+
+    # Get source video properties once
+    orig_w, orig_h, fps = get_video_properties(source_video)
+    out_h = orig_h + (orig_h % 2)  # Ensure even
+    out_w = int(out_h * aspect_ratio)
+    out_w += out_w % 2  # Ensure even
+
+    # Resolve encoder info for manifest (Renderer will use this)
+    hw_enc_name, hw_enc_type = detect_hw_encoder()
+    enc_name, enc_type = resolve_encoder(config.get("encoder", "auto"), hw_enc_name, hw_enc_type)
+    enc_args = build_encoder_args(enc_type, config.get("quality", "balanced"),
+                                   crf_override=config.get("crf"), preset_override=config.get("preset"))
+
+
+    # Run scene detection ONCE on the full source video
+    all_scenes, _ = detect_scenes(source_video, downscale=downscale, frame_skip=frame_skip)
+
+    for i, clip in enumerate(manifest):
+        clip_start = clip["start"]
+        clip_end = clip["end"]
+        clip_duration = clip_end - clip_start
+
+        # Filter scenes to this clip's time range
+        clip_scenes = [(s, e) for s, e in all_scenes
+                       if e.get_seconds() > clip_start and s.get_seconds() < clip_end]
+
+        # Analyze each scene
+        scene_plans = []
+        track_count = 0
+        for start_time, end_time in clip_scenes:
+            analysis = analyze_scene_content(source_video, start_time, end_time)
+            strategy, target_box = decide_cropping_strategy(analysis, orig_h)
+            
+            crop_box = None
+            if strategy == 'TRACK' and target_box:
+                crop_box = list(calculate_crop_box(target_box, orig_w, orig_h))
+                track_count += 1
+
+            scene_plans.append({
+                "start_seconds": start_time.get_seconds(),
+                "end_seconds": end_time.get_seconds(),
+                "start_frame": start_time.get_frames(),
+                "end_frame": end_time.get_frames(),
+                "strategy": strategy,
+                "target_box": target_box,
+                "crop_box": crop_box,
+                "num_people": len(analysis)
+            })
+
+        clip["crop"] = {
+            "enabled": True,
+            "ratio": ratio_str,
+            "aspect_ratio": aspect_ratio,
+            "output_width": out_w,
+            "output_height": out_h,
+            "source_width": orig_w,
+            "source_height": orig_h,
+            "fps": fps,
+            "encoder": enc_name,
+            "encoder_type": enc_type,
+            "encoder_args": enc_args,
+            "quality": config.get("quality", "balanced"),
+            "scenes": scene_plans
+        }
+
+        lb_count = len(scene_plans) - track_count
+        print(f"     [{i+1}/{len(manifest)}] {clip.get('title','?')[:40]}  ({len(scene_plans)} scenes: {track_count}T/{lb_count}L)")
+
+    return manifest
+
 def main(input_video_path, output_video_path, ratio='9:16', quality='balanced', crf=None, preset=None, 
          plan_only=False, frame_skip=0, downscale=0, encoder='auto'):
     """
