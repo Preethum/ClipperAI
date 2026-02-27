@@ -122,6 +122,99 @@ def analyze_scene_content(video_path, scene_start_time, scene_end_time):
     return detected_objects
 
 
+def analyze_scene_multiframe(video_path, scene_start_sec, scene_end_sec, frame_timestamps):
+    """
+    Analyze multiple frames within a scene for more robust person detection.
+    Uses pre-computed vision frame timestamps instead of just the middle frame.
+    Returns averaged detection results.
+    """
+    import cv2
+
+    # Find all vision timestamps that fall within this scene
+    scene_timestamps = [t for t in frame_timestamps if scene_start_sec <= t <= scene_end_sec]
+    if not scene_timestamps:
+        return []  # Caller should fall back to middle-frame
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return []
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    all_detections = []  # List of per-frame detection lists
+
+    for ts in scene_timestamps:
+        frame_num = int(ts * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        results = get_yolo_model()([frame], verbose=False)
+        frame_objects = []
+        for result in results:
+            for box in result.boxes:
+                if box.cls[0] == 0:  # person class
+                    x1, y1, x2, y2 = [int(i) for i in box.xyxy[0]]
+                    person_box = [x1, y1, x2, y2]
+                    person_roi_gray = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                    faces = get_face_cascade().detectMultiScale(
+                        person_roi_gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+                    )
+                    face_box = None
+                    if len(faces) > 0:
+                        fx, fy, fw, fh = faces[0]
+                        face_box = [x1 + fx, y1 + fy, x1 + fx + fw, y1 + fy + fh]
+                    frame_objects.append({'person_box': person_box, 'face_box': face_box})
+        if frame_objects:
+            all_detections.append(frame_objects)
+
+    cap.release()
+
+    if not all_detections:
+        return []
+
+    # Average across frames: use the frame with the median person count
+    # to avoid outlier frames (e.g., transitions with 0 or too many detections)
+    all_detections.sort(key=len)
+    median_idx = len(all_detections) // 2
+    best_detection = all_detections[median_idx]
+
+    # If we have multiple frames to average from, average the bounding boxes
+    # of the most common person count
+    target_count = len(best_detection)
+    matching = [d for d in all_detections if len(d) == target_count]
+
+    if len(matching) <= 1:
+        return best_detection
+
+    # Average person boxes across matching frames
+    averaged = []
+    for person_idx in range(target_count):
+        avg_person = [0, 0, 0, 0]
+        avg_face = None
+        face_count = 0
+        face_accum = [0, 0, 0, 0]
+
+        for frame_det in matching:
+            pb = frame_det[person_idx]['person_box']
+            for j in range(4):
+                avg_person[j] += pb[j]
+            fb = frame_det[person_idx].get('face_box')
+            if fb:
+                face_count += 1
+                for j in range(4):
+                    face_accum[j] += fb[j]
+
+        n = len(matching)
+        avg_person = [int(v / n) for v in avg_person]
+        if face_count > 0:
+            avg_face = [int(v / face_count) for v in face_accum]
+
+        averaged.append({'person_box': avg_person, 'face_box': avg_face})
+
+    return averaged
+
+
 def detect_scenes(video_path, downscale=0, frame_skip=0):
     """Detect scene boundaries.
 
@@ -463,6 +556,9 @@ def plan(source_video, manifest, config):
     out_w = int(out_h * aspect_ratio)
     out_w += out_w % 2  # Ensure even
 
+    # Vision frame timestamps for multi-frame YOLO analysis (from ClipperM)
+    vision_timestamps = config.get("vision_frame_timestamps", [])
+
     # Resolve encoder info for manifest (Renderer will use this)
     hw_enc_name, hw_enc_type = detect_hw_encoder()
     enc_name, enc_type = resolve_encoder(config.get("encoder", "auto"), hw_enc_name, hw_enc_type)
@@ -486,7 +582,19 @@ def plan(source_video, manifest, config):
         scene_plans = []
         track_count = 0
         for start_time, end_time in clip_scenes:
-            analysis = analyze_scene_content(source_video, start_time, end_time)
+            # Use multi-frame analysis if vision timestamps are available
+            if vision_timestamps:
+                analysis = analyze_scene_multiframe(
+                    source_video,
+                    start_time.get_seconds(),
+                    end_time.get_seconds(),
+                    vision_timestamps
+                )
+                # Fall back to single middle-frame if no vision frames in this scene
+                if not analysis:
+                    analysis = analyze_scene_content(source_video, start_time, end_time)
+            else:
+                analysis = analyze_scene_content(source_video, start_time, end_time)
             strategy, target_box = decide_cropping_strategy(analysis, orig_h)
             
             crop_box = None
