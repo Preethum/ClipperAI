@@ -10,8 +10,17 @@ import base64
 import numpy as np
 from lmstudio import Client
 from faster_whisper import WhisperModel
-from tqdm import tqdm 
+from tqdm import tqdm
 from moviepy.video.io.VideoFileClip import VideoFileClip
+
+# Pre-compiled regexes for hot-path extraction (called per transcript/OCR line)
+_RE_TRANSCRIPT = re.compile(r'\[([\d.]+)s - ([\d.]+)s\]')
+_RE_OCR_TIME = re.compile(r'\[([\d.]+)s\]')
+_RE_THINK = re.compile(r'</think>.*?</think>', re.DOTALL)
+_RE_CODEBLOCK = re.compile(r'```json|```', re.IGNORECASE)
+_RE_JSON_ARRAY = re.compile(r'\[.*\]', re.DOTALL)
+_RE_NON_ALNUM = re.compile(r'[^\w\s]')
+_RE_BRACKET_PAREN = re.compile(r'\[.*?\] \(.*?\) ')
 
 # Import path utilities
 try:
@@ -77,21 +86,8 @@ def initialize_client():
     """Initialize the LM Studio client with current LM_STUDIO_URL."""
     global client
     if LM_STUDIO_URL is None:
-        return  # Not yet configured, will be called from main()
-    host = LM_STUDIO_URL
-    if host.startswith("http://"):
-        host = host[7:]
-    elif host.startswith("https://"):
-        host = host[8:]
-    elif host.startswith("ws://"):
-        host = host[5:]
-    elif host.startswith("wss://"):
-        host = host[6:]
-        
-    if host.endswith("/v1"):
-        host = host[:-3]
-    if host.endswith("/"):
-        host = host[:-1]
+        return
+    host = re.sub(r'^(?:https?|wss?)://', '', LM_STUDIO_URL).rstrip('/').removesuffix('/v1')
     client = Client(api_host=host)
 
 initialize_client()
@@ -125,20 +121,13 @@ def main(input_video_path, output_dir, lm_studio_url, scout_model,
     # Initialize client with new URL
     initialize_client()
     
-    # Create output directory
-    if not os.path.exists(OUTPUT_DIR): 
-        os.makedirs(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Run the clipper logic
     return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, VIRAL_ARCHETYPES, enable_ocr, enable_vision, vision_model, vision_interval, vision_concurrency)
 
 def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, viral_archetypes=None, enable_ocr=True, enable_vision=False, vision_model="llama-3.2-11b-vision-instruct", vision_interval=2.0, vision_concurrency=2):
     """Execute the core clipper logic with current global configuration."""
-    import cv2
-    import easyocr
-    from moviepy.video.io.VideoFileClip import VideoFileClip
-    from faster_whisper import WhisperModel
-    
     # Initialize models
     reader = easyocr.Reader(['en'], gpu=True)
     whisper_model = WhisperModel("small", device="cuda", compute_type="float16")
@@ -234,142 +223,114 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
     print("\n Selecting Final Top Clips...")
     final_clips = pass_2_editor(clean_candidate_pool, max_limit=MAX_TOTAL_CLIPS, viral_archetypes=viral_archetypes, system_instruction=editor_system_instruction, user_prompt=editor_user_prompt)
     
-    # 6. Export clips
-    exported_clips = []
-    
-    if final_clips:
-        with VideoFileClip(VIDEO_PATH) as video:
-            for i, selected_clip in enumerate(final_clips):
-                try:
-                    target_id = selected_clip.get('clip_id')
-                    original_clip_data = next((c for c in raw_candidate_pool if c.get('clip_id') == target_id), None)
-                    
-                    if not original_clip_data:
-                        print(f"[ERROR] LLM Hallucinated ID: {target_id}")
-                        continue
-                    
-                    raw_start = float(original_clip_data.get('start', 0))
-                    raw_end = float(original_clip_data.get('end', 0))
-                    anchor_start = original_clip_data.get('anchor_start_text', '')
-                    anchor_end = original_clip_data.get('anchor_end_text', '')
-                    
-                    if (raw_end - raw_start) < 5.0: raw_end = raw_start + 15.0 
-                    
-                    true_start = snap_timestamp_to_transcript(anchor_start, raw_start, full_transcript, is_end=False)
-                    true_end = snap_timestamp_to_transcript(anchor_end, raw_end, full_transcript, is_end=True)
-                    
-                    pad_s = max(0.0, min(float(original_clip_data.get('start_padding', 0.3)), 5.0))
-                    pad_e = max(0.0, min(float(original_clip_data.get('end_padding', 1.5)), 5.0))
-                    
-                    s = max(0.0, true_start - pad_s)
-                    e = min(video.duration, true_end + pad_e)
-                    
-                    clip_title = selected_clip.get('clip_title', selected_clip.get('title', f'clip_{i+1}'))
-                    # Sanitize title for file name: lowercase, replace spaces with underscores, remove special chars
-                    safe_title = clip_title.lower().strip()
-                    safe_title = safe_title.replace(' ', '_').replace("'", '').replace('"', '')
-                    safe_title = ''.join(c for c in safe_title if c.isalnum() or c == '_')
-                    safe_title = safe_title[:50]  # Truncate to 50 chars max
-                    if not safe_title:
-                        safe_title = f'clip_{i+1}'
-                    file_name = f"{i+1}_{safe_title}.mp4"
-                    output_fn = os.path.join(OUTPUT_DIR, file_name)
-                    
-                    print(f"\n[EXPORT] {file_name} ({format_time(s)} - {format_time(e)})")
-                    print(f"        Title: '{clip_title}'")
-                    
-                    # Version-agnostic clipping
-                    if hasattr(video, "subclipped"):
-                        subclip = video.subclipped(s, e)
-                    else:
-                        subclip = video.subclip(s, e)
-                    subclip.write_videofile(
-                        output_fn, 
-                        codec="libx264", 
-                        audio_codec="aac", 
-                        threads=4, 
-                        preset="superfast", 
-                        logger=None
-                    )
-                    
-                    exported_clips.append({
-                        "file_name": file_name,
-                        "file_path": output_fn,
-                        "title": clip_title,
-                        "start_time": s,
-                        "end_time": e,
-                        "duration": e - s
-                    })
-                    
-                except Exception as ex:
-                    print(f"[ERROR] Skipping clip {i+1}: {ex}")
-    
-    # Save metadata
-    if exported_clips:
-        metadata_path = os.path.join(OUTPUT_DIR, "clips_metadata.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(exported_clips, f, indent=4)
-        print(f"\n Saved clip metadata to: {metadata_path}")
-    
-    return exported_clips
+    # 6. Build manifest (no video I/O — Renderer handles export)
+    manifest = []
+
+    # Get video duration without loading the full clip
+    with VideoFileClip(VIDEO_PATH) as video:
+        video_duration = video.duration
+
+    for i, selected_clip in enumerate(final_clips):
+        try:
+            target_id = selected_clip.get('clip_id')
+            original_clip_data = next((c for c in raw_candidate_pool if c.get('clip_id') == target_id), None)
+
+            if not original_clip_data:
+                print(f"[ERROR] LLM Hallucinated ID: {target_id}")
+                continue
+
+            raw_start = float(original_clip_data.get('start', 0))
+            raw_end = float(original_clip_data.get('end', 0))
+            anchor_start = original_clip_data.get('anchor_start_text', '')
+            anchor_end = original_clip_data.get('anchor_end_text', '')
+
+            if (raw_end - raw_start) < 5.0: raw_end = raw_start + 15.0
+
+            true_start = snap_timestamp_to_transcript(anchor_start, raw_start, full_transcript, is_end=False)
+            true_end = snap_timestamp_to_transcript(anchor_end, raw_end, full_transcript, is_end=True)
+
+            pad_s = max(0.0, min(float(original_clip_data.get('start_padding', 0.3)), 5.0))
+            pad_e = max(0.0, min(float(original_clip_data.get('end_padding', 1.5)), 5.0))
+
+            s = max(0.0, true_start - pad_s)
+            e = min(video_duration, true_end + pad_e)
+
+            clip_title = selected_clip.get('clip_title', selected_clip.get('title', f'clip_{i+1}'))
+            # Sanitize title for file name
+            safe_title = clip_title.lower().strip().replace(' ', '_').replace("'", '').replace('"', '')
+            safe_title = ''.join(c for c in safe_title if c.isalnum() or c == '_')[:50] or f'clip_{i+1}'
+            file_name = f"{i+1}_{safe_title}.mp4"
+
+            print(f"\n[MANIFEST] {file_name} ({format_time(s)} - {format_time(e)})")
+            print(f"           Title: '{clip_title}'")
+
+            manifest.append({
+                "clip_id": target_id,
+                "file_name": file_name,
+                "title": clip_title,
+                "start": round(s, 3),
+                "end": round(e, 3),
+                "duration": round(e - s, 3),
+                "start_padding": pad_s,
+                "end_padding": pad_e,
+                "anchor_start_text": anchor_start,
+                "anchor_end_text": anchor_end,
+                "scores": {
+                    "narrative": original_clip_data.get('llm_narrative_score', 0),
+                    "hybrid": original_clip_data.get('hybrid_score', 0)
+                },
+                "viral_archetype": selected_clip.get('viral_archetype', ''),
+                "engagement_trigger": selected_clip.get('engagement_trigger', ''),
+                "selection_reason": selected_clip.get('selection_reason', '')
+            })
+
+        except Exception as ex:
+            print(f"[ERROR] Skipping clip {i+1}: {ex}")
+
+    # Save manifest checkpoint
+    if manifest:
+        manifest_path = os.path.join(OUTPUT_DIR, "clips_manifest.json")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(manifest_path, 'w') as f:
+            json.dump(manifest, f, indent=4)
+        print(f"\n[LOG] Saved manifest ({len(manifest)} clips) to: {manifest_path}")
+
+    return manifest
 
 # --- UTILS ---
 def snap_timestamp_to_transcript(anchor_text, target_time, full_transcript, is_end=False):
-    if not anchor_text or anchor_text in ["first four words exactly", "last four words exactly"]:
-        return target_time 
+    if not anchor_text or anchor_text in ("first four words exactly", "last four words exactly"):
+        return target_time
 
-    anchor_clean = re.sub(r'[^\w\s]', '', anchor_text.lower().strip())
+    anchor_clean = _RE_NON_ALNUM.sub('', anchor_text.lower().strip())
     best_match_time = target_time
     highest_ratio = 0.0
 
     for line in full_transcript:
         start_t, end_t = extract_transcript_times(line)
-        if start_t == -1.0: continue
-        
-        if abs(start_t - target_time) < 15.0:
-            line_text = re.sub(r'\[.*?\] \(.*?\) ', '', line) 
-            line_clean = re.sub(r'[^\w\s]', '', line_text.lower().strip())
-            
-            ratio = difflib.SequenceMatcher(None, anchor_clean, line_clean).ratio()
-            if anchor_clean in line_clean: ratio = 1.0 
-
-            if ratio > highest_ratio and ratio > 0.4:
-                highest_ratio = ratio
-                best_match_time = end_t if is_end else start_t
+        if start_t == -1.0 or abs(start_t - target_time) >= 15.0:
+            continue
+        line_clean = _RE_NON_ALNUM.sub('', _RE_BRACKET_PAREN.sub('', line).lower().strip())
+        ratio = 1.0 if anchor_clean in line_clean else difflib.SequenceMatcher(None, anchor_clean, line_clean).ratio()
+        if ratio > highest_ratio and ratio > 0.4:
+            highest_ratio = ratio
+            best_match_time = end_t if is_end else start_t
 
     if highest_ratio > 0.4:
         print(f"      [SNAP] Adjusted LLM time {target_time}s -> {best_match_time}s based on text: '{anchor_text}'")
         return best_match_time
-    
-    return target_time 
+    return target_time
 
 def get_safe_json(raw_response):
-    # print(f"[DEBUG] get_safe_json called with response length: {len(raw_response)}")
+    """Extract and parse a JSON array from raw LLM output, tolerating thinking blocks and markdown."""
     try:
-        # print(f"[DEBUG] Raw LLM response:\n{raw_response}\n{'='*50}")
-        
-        clean_text = re.sub(r'</think>.*?</think>', '', raw_response, flags=re.DOTALL)
-        clean_text = re.sub(r'```json|```', '', clean_text, flags=re.IGNORECASE).strip()
-        # print(f"[DEBUG] After removing thinking blocks:\n{clean_text}")
-        
-        match = re.search(r'\[.*\]', clean_text, re.DOTALL)
-        if match: 
-            clean_text = match.group(0)
-            # print(f"[DEBUG] Extracted JSON array:\n{clean_text}")
-        else:
-            # print(f"[DEBUG] No JSON array found in response")
+        clean = _RE_CODEBLOCK.sub('', _RE_THINK.sub('', raw_response)).strip()
+        m = _RE_JSON_ARRAY.search(clean)
+        if not m:
             return None
-        
-        # print(f"[DEBUG] Attempting to parse JSON...")
-        
         try:
-            parsed_json = json_repair.loads(clean_text)
-            # print(f"[DEBUG] Successfully parsed JSON: {parsed_json}")
-            return parsed_json
-        except json.JSONDecodeError as e:
-            # print(f"[ERROR] JSON decode error: {e}")
-            # print(f"[ERROR] Error position: Character {e.pos} in line {e.lineno}")
-            # print(f"[DEBUG] Problematic text around error: ...{clean_text[max(0, e.pos-20):e.pos+20]}...")
+            return json_repair.loads(m.group(0))
+        except json.JSONDecodeError:
             return None
     except Exception as e:
         print(f"[ERROR] Unexpected error during JSON parsing: {e}")
@@ -382,14 +343,12 @@ def format_time(seconds):
 
 # --- SEMANTIC CHUNKING UTILS ---
 def extract_transcript_times(line):
-    match = re.search(r'\[([\d\.]+)s - ([\d\.]+)s\]', line)
-    if match: return float(match.group(1)), float(match.group(2))
-    return -1.0, -1.0
+    m = _RE_TRANSCRIPT.search(line)
+    return (float(m.group(1)), float(m.group(2))) if m else (-1.0, -1.0)
 
 def extract_ocr_time(line):
-    match = re.search(r'\[([\d\.]+)s\]', line)
-    if match: return float(match.group(1))
-    return -1.0
+    m = _RE_OCR_TIME.search(line)
+    return float(m.group(1)) if m else -1.0
 
 def generate_semantic_chapters(transcript, ocr_data, min_length=45, max_length=180, pause_threshold=2.0):
     chapters = []
@@ -451,17 +410,11 @@ def calculate_iou(clip1, clip2):
 
 def deduplicate_clips(candidates, threshold=0.6):
     print(f"\n Deduplicating {len(candidates)} threshold={threshold} raw candidates...")
-    sorted_cands = sorted(candidates, key=lambda x: x.get('hybrid_score', 0), reverse=True)
-    unique_clips = []
-    for c in sorted_cands:
-        is_duplicate = False
-        for u in unique_clips:
-            if calculate_iou(c, u) > threshold:
-                is_duplicate = True
-                break
-        if not is_duplicate:
-            unique_clips.append(c)
-    return unique_clips
+    unique = []
+    for c in sorted(candidates, key=lambda x: x.get('hybrid_score', 0), reverse=True):
+        if not any(calculate_iou(c, u) > threshold for u in unique):
+            unique.append(c)
+    return unique
 
 # --- EXTRACTION WITH MULTI-MODAL SIGNALS ---
 def get_transcript_with_signals(video_path, model):
@@ -640,7 +593,7 @@ def pass_1_scout(transcript_chunk, ocr_chunk, vision_chunk, window_label, prev_c
         print(f"[ERROR] LLM Request failed: {e}")
         return None
     
-    print(f"\n--- RAW LLM OUTPUT ---\n{raw_output}\n----------------------\n")
+    # print(f"\n--- RAW LLM OUTPUT ---\n{raw_output}\n----------------------\n")
     return get_safe_json(raw_output)
 
 # --- PASS 2: THE EDITOR (BATCHED) ---
@@ -659,9 +612,7 @@ def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None, system_ins
             "Satisfying Process"
         ]
         
-    archetypes_list = ""
-    for archetype in viral_archetypes:
-        archetypes_list += f"   - '{archetype}'\n"
+    archetypes_list = "".join(f"   - '{a}'\n" for a in viral_archetypes)
         
     formatted_system = system_instruction.format(
         archetypes_list=archetypes_list,
@@ -675,15 +626,13 @@ def pass_2_editor(candidate_pool, max_limit=5, viral_archetypes=None, system_ins
     for i in range(0, len(candidate_pool), batch_size):
         batch = candidate_pool[i:i + batch_size]
         
-        slim_pool = []
-        for c in batch: 
-            slim_pool.append({
-                "clip_id": c.get("clip_id"),
-                "clip_title": c.get("clip_title", "No title provided"), 
-                "reasoning": c.get("reasoning", "No reasoning provided"),
-                "narrative_score": c.get("llm_narrative_score", 0),
-                "energy_score": c.get("hybrid_score", 0) 
-            })
+        slim_pool = [{
+            "clip_id": c.get("clip_id"),
+            "clip_title": c.get("clip_title", "No title provided"),
+            "reasoning": c.get("reasoning", "No reasoning provided"),
+            "narrative_score": c.get("llm_narrative_score", 0),
+            "energy_score": c.get("hybrid_score", 0)
+        } for c in batch]
 
         formatted_user = user_prompt.format(
             batch_num=(i//batch_size + 1),
