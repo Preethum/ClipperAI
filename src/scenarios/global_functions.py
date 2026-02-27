@@ -113,6 +113,7 @@ def run_complete_pipeline(config):
 
     try:
         manifest = []
+        vision_frame_timestamps = []
 
         # ── CLIPPER (produces manifest) ──
         if "clipper" in steps:
@@ -120,7 +121,7 @@ def run_complete_pipeline(config):
             _header(step_num, "🎬", "CLIPPER — Finding clips", total)
             _status(f"Scout: {clip_cfg.get('scout_model', '?')}  |  Editor: {clip_cfg.get('editor_model', '?')}")
             t0 = time.time()
-            manifest = clipper_main(
+            manifest, vision_frame_timestamps = clipper_main(
                 input_video_path=source_video,
                 output_dir=output_dir,
                 **{k: clip_cfg[k] for k in (
@@ -143,7 +144,11 @@ def run_complete_pipeline(config):
             step_num += 1
             _header(step_num, "✂️", f"CROPPER — Analyzing scenes ({crop_cfg.get('ratio', '9:16')})", total)
             t0 = time.time()
-            manifest = cropper_plan(source_video, manifest, crop_cfg)
+            # Pass vision frame timestamps to CropperM for multi-frame YOLO
+            crop_cfg_with_frames = dict(crop_cfg)
+            if vision_frame_timestamps:
+                crop_cfg_with_frames["vision_frame_timestamps"] = vision_frame_timestamps
+            manifest = cropper_plan(source_video, manifest, crop_cfg_with_frames)
             _status(f"✅ {len(manifest)} clips enriched ({time.time()-t0:.0f}s)")
 
         # ── SUBS (enrich manifest) ──

@@ -143,9 +143,10 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
     
     # Optional Vision Analysis
     full_vision = []
+    vision_frame_timestamps = []
     if enable_vision:
         print(f" Extracting vision context ({vision_model} at {vision_interval}s interval, {vision_concurrency} threads)...")
-        full_vision = get_vision_descriptions(VIDEO_PATH, vision_model, vision_interval, vision_concurrency)
+        full_vision, vision_frame_timestamps = get_vision_descriptions(VIDEO_PATH, vision_model, vision_interval, vision_concurrency)
     
     # 2. Generate semantic chapters
     print(" Analyzing semantic chapters...")
@@ -289,13 +290,18 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
 
     # Save manifest checkpoint
     if manifest:
+        # Attach vision frame timestamps at the top level for CropperM
+        manifest_wrapper = {
+            "vision_frame_timestamps": vision_frame_timestamps,
+            "clips": manifest
+        }
         manifest_path = os.path.join(OUTPUT_DIR, "clips_manifest.json")
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         with open(manifest_path, 'w') as f:
-            json.dump(manifest, f, indent=4)
+            json.dump(manifest_wrapper, f, indent=4)
         print(f"\n[LOG] Saved manifest ({len(manifest)} clips) to: {manifest_path}")
 
-    return manifest
+    return manifest, vision_frame_timestamps
 
 # --- UTILS ---
 def snap_timestamp_to_transcript(anchor_text, target_time, full_transcript, is_end=False):
@@ -549,7 +555,10 @@ def get_vision_descriptions(video_path, model_name, interval=2.0, max_workers=2)
         except: return 0.0
     
     vision_data.sort(key=_extract_time)
-    return vision_data
+
+    # Also return the raw timestamps for downstream modules (e.g., CropperM)
+    sampled_timestamps = sorted([t for _, t in tasks])
+    return vision_data, sampled_timestamps
 
 # --- PASS 1: THE SCOUT ---
 def pass_1_scout(transcript_chunk, ocr_chunk, vision_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0, system_instruction=None, user_prompt=None, model_name=None):

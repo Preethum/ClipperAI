@@ -19,8 +19,8 @@ def get_podcast_config():
             "clipper": {
                 "enabled": True,
                 "min_clip_duration": 45.0,
-                "max_clip_duration": 90.0,
-                "max_total_clips": 10,
+                "max_clip_duration": 120.0,  # Allow slightly longer clips from podcasts
+                "max_total_clips": 15,       # More content = more potential clips
                 
                 # ClipperM accepted parameters
                 "scout_model": "deepseek-r1-distill-qwen-32b",
@@ -30,9 +30,9 @@ def get_podcast_config():
                 # Vision and OCR Settings
                 "enable_ocr": False,
                 "enable_vision": True,
-                "vision_model": "qwen/qwen3-vl-30b",
-                "vision_interval": 2.0,
-                "vision_concurrency": 5,
+                "vision_model": "google/gemma-3-27b",
+                "vision_interval": 5.0,      # 1hr @ 5s = 720 frames (vs 1800 at 2s)
+                "vision_concurrency": 6,      # Parallel API calls for speed
                 
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
@@ -132,11 +132,11 @@ def get_podcast_config():
                 # CropperM plan() parameters
                 "ratio": "9:16",
                 "quality": "balanced",
-                "frame_skip": 0,
-                "downscale": 0,
+                "frame_skip": 2,              # Skip every 2nd frame — 3× faster scene detection
+                "downscale": 2,               # Half-res analysis — 4× fewer pixels to process
                 "encoder": "auto",
-                "crf": None,      # Use quality preset default
-                "preset": None    # Use quality preset default
+                "crf": None,
+                "preset": None
             },
             "subs": {
                 "enabled": True,
