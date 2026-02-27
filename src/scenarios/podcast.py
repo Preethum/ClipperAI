@@ -27,6 +27,13 @@ def get_podcast_config():
                 "editor_model": "google/gemma-3-27b",
                 "lm_studio_url": "http://localhost:1234/v1",
                 
+                # Vision and OCR Settings
+                "enable_ocr": False,
+                "enable_vision": True,
+                "vision_model": "qwen/qwen3-vl-30b",
+                "vision_interval": 2.0,
+                "vision_concurrency": 5
+                
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
                 
@@ -60,7 +67,9 @@ def get_podcast_config():
                     "11. THE 'SKIP' RULE: If the transcript is boring, logistical, or lacks a satisfying payoff, DO NOT force a clip. Output an empty JSON array [].\n\n"
                     "### PHASE 6: CHAIN OF THOUGHT\n"
                     "Your </think> block MUST explicitly calculate: End_Time - Start_Time = Duration. If the Duration is less than {min_dur} seconds, you must rewrite the clip to include more setup.\n"
-                    "Output ONLY the </think> block followed immediately by the raw JSON array. Do not output any other text."
+                    "Output ONLY the </think> block followed immediately by the raw JSON array. Do not output any other text.\n\n"
+                    "### PHASE 7: BREVITY RULE (CRITICAL)\n"
+                    "Keep ALL text fields concise. The 'reasoning' field MUST be 10 sentences maximum. The 'context_check' and 'temporal_math' fields MUST each be 3 sentences maximum. Do NOT write paragraphs."
                 ),
                 
                 "scout_user_prompt": (
@@ -69,6 +78,7 @@ def get_podcast_config():
                     "--- CURRENT CHAPTER (Main focus area) ---{transcript_chunk}\n\n"
                     "--- UPCOMING CONTEXT (What happens right after this chunk) ---{up_ctx}\n\n"
                     "--- FULL CONTEXT OCR (Visual Scene Transitions) ---{ocr_chunk}\n\n"
+                    "--- FULL VISUAL CONTEXT (Keyframe Descriptions) ---{vision_chunk}\n\n"
                     "INSTRUCTIONS:\n"
                     "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
                     "[\n"

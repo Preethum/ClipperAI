@@ -6,6 +6,7 @@ import json_repair
 import re
 import difflib
 import requests
+import base64
 import numpy as np
 from lmstudio import Client
 from faster_whisper import WhisperModel
@@ -54,33 +55,18 @@ LOCAL_BIN_DIR = setup_bin_path()
 if LOCAL_BIN_DIR is None:
     LOCAL_BIN_DIR = get_bin_dir()  # For reference in error messages
 
-# --- DEFAULT CONFIGURATION ---
-# Get project root: src/modules -> src -> project root
+# --- CONFIGURATION (set by scenario files, no defaults) ---
 PROJECT_ROOT = get_project_root()
-DEFAULT_VIDEO_PATH = os.path.join(PROJECT_ROOT, "podcast.mp4")
-DEFAULT_LM_STUDIO_URL = "http://localhost:1234/v1" 
 
-# Multi-Agent Pipeline models
-DEFAULT_SCOUT_MODEL = "deepseek-r1-distill-qwen-32b" # Pass 1: Logical filtering & data crunching
-DEFAULT_EDITOR_MODEL = "google/gemma-3-27b"          # Pass 2: Creative narrative selection
-
-DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "out", "01_clips")
-
-# --- SYSTEM ADJUSTMENT VARIABLES ---
-DEFAULT_MIN_CLIP_DURATION = 45.0  # Minimum length of a clip in seconds
-DEFAULT_MAX_CLIP_DURATION = 90.0  # Maximum length of a clip in seconds
-DEFAULT_MAX_TOTAL_CLIPS = 40       # Maximum number of total clips you want the pipeline to output
-DEFAULT_DEDUPLICATION_THRESHOLD = 0.6  # Default IoU threshold for deduplication
-
-# Runtime configuration (will be set by main function)
-VIDEO_PATH = DEFAULT_VIDEO_PATH
-LM_STUDIO_URL = DEFAULT_LM_STUDIO_URL
-SCOUT_MODEL = DEFAULT_SCOUT_MODEL
-EDITOR_MODEL = DEFAULT_EDITOR_MODEL
-OUTPUT_DIR = DEFAULT_OUTPUT_DIR
-MIN_CLIP_DURATION = DEFAULT_MIN_CLIP_DURATION
-MAX_CLIP_DURATION = DEFAULT_MAX_CLIP_DURATION
-MAX_TOTAL_CLIPS = DEFAULT_MAX_TOTAL_CLIPS
+# Runtime configuration (will be set by main function from scenario config)
+VIDEO_PATH = None
+LM_STUDIO_URL = None
+SCOUT_MODEL = None
+EDITOR_MODEL = None
+OUTPUT_DIR = None
+MIN_CLIP_DURATION = None
+MAX_CLIP_DURATION = None
+MAX_TOTAL_CLIPS = None
 
 client = None
 
@@ -90,6 +76,8 @@ client = None
 def initialize_client():
     """Initialize the LM Studio client with current LM_STUDIO_URL."""
     global client
+    if LM_STUDIO_URL is None:
+        return  # Not yet configured, will be called from main()
     host = LM_STUDIO_URL
     if host.startswith("http://"):
         host = host[7:]
@@ -107,44 +95,32 @@ def initialize_client():
     client = Client(api_host=host)
 
 initialize_client()
-def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model=None, 
-         editor_model=None, min_clip_duration=None, max_clip_duration=None, max_total_clips=None, viral_archetypes=None, 
-         scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, deduplication_threshold=None):
+def main(input_video_path, output_dir, lm_studio_url, scout_model, 
+         editor_model, min_clip_duration, max_clip_duration, max_total_clips, viral_archetypes, 
+         scout_system_instruction, scout_user_prompt, editor_system_instruction, editor_user_prompt, deduplication_threshold,
+         enable_ocr, enable_vision, vision_model, vision_interval, vision_concurrency):
     """
-    Main function to run the clipper with custom configuration.
-    
-    Args:
-        input_video_path (str): Path to input video file
-        output_dir (str): Directory to save output clips
-        lm_studio_url (str): LM Studio API URL
-        scout_model (str): Model name for scout pass
-        editor_model (str): Model name for editor pass
-        min_clip_duration (float): Minimum clip duration in seconds
-        max_clip_duration (float): Maximum clip duration in seconds
-        max_total_clips (int): Maximum number of clips to generate
-    
-    Returns:
-        list: List of generated clip metadata
+    Main function to run the clipper. All parameters are required and must be provided by the scenario config.
     """
     global VIDEO_PATH, LM_STUDIO_URL, SCOUT_MODEL, EDITOR_MODEL, OUTPUT_DIR
     global MIN_CLIP_DURATION, MAX_CLIP_DURATION, MAX_TOTAL_CLIPS, client
     global SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, DEDUPLICATION_THRESHOLD, VIRAL_ARCHETYPES
     
-    # Update configuration
-    VIDEO_PATH = input_video_path or DEFAULT_VIDEO_PATH
-    OUTPUT_DIR = output_dir or DEFAULT_OUTPUT_DIR
-    LM_STUDIO_URL = lm_studio_url or DEFAULT_LM_STUDIO_URL
-    SCOUT_MODEL = scout_model or DEFAULT_SCOUT_MODEL
-    EDITOR_MODEL = editor_model or DEFAULT_EDITOR_MODEL
-    MIN_CLIP_DURATION = min_clip_duration or DEFAULT_MIN_CLIP_DURATION
-    MAX_CLIP_DURATION = max_clip_duration or DEFAULT_MAX_CLIP_DURATION
-    MAX_TOTAL_CLIPS = max_total_clips or DEFAULT_MAX_TOTAL_CLIPS
+    # Set configuration from scenario
+    VIDEO_PATH = input_video_path
+    OUTPUT_DIR = output_dir
+    LM_STUDIO_URL = lm_studio_url
+    SCOUT_MODEL = scout_model
+    EDITOR_MODEL = editor_model
+    MIN_CLIP_DURATION = min_clip_duration
+    MAX_CLIP_DURATION = max_clip_duration
+    MAX_TOTAL_CLIPS = max_total_clips
     SCOUT_SYSTEM_INSTRUCTION = scout_system_instruction
     SCOUT_USER_PROMPT = scout_user_prompt
     EDITOR_SYSTEM_INSTRUCTION = editor_system_instruction
     EDITOR_USER_PROMPT = editor_user_prompt
     VIRAL_ARCHETYPES = viral_archetypes
-    DEDUPLICATION_THRESHOLD = deduplication_threshold or DEFAULT_DEDUPLICATION_THRESHOLD
+    DEDUPLICATION_THRESHOLD = deduplication_threshold
     
     # Initialize client with new URL
     initialize_client()
@@ -154,9 +130,9 @@ def main(input_video_path=None, output_dir=None, lm_studio_url=None, scout_model
         os.makedirs(OUTPUT_DIR)
     
     # Run the clipper logic
-    return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, VIRAL_ARCHETYPES)
+    return _run_clipper_logic(SCOUT_SYSTEM_INSTRUCTION, SCOUT_USER_PROMPT, EDITOR_SYSTEM_INSTRUCTION, EDITOR_USER_PROMPT, VIRAL_ARCHETYPES, enable_ocr, enable_vision, vision_model, vision_interval, vision_concurrency)
 
-def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, viral_archetypes=None):
+def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, editor_system_instruction=None, editor_user_prompt=None, viral_archetypes=None, enable_ocr=True, enable_vision=False, vision_model="llama-3.2-11b-vision-instruct", vision_interval=2.0, vision_concurrency=2):
     """Execute the core clipper logic with current global configuration."""
     import cv2
     import easyocr
@@ -174,7 +150,13 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
     # 1. Extraction
     print(" Extracting transcript and OCR data...")
     full_transcript = get_transcript_with_signals(VIDEO_PATH, whisper_model)
-    full_ocr = get_ocr_list(VIDEO_PATH, reader)
+    full_ocr = get_ocr_list(VIDEO_PATH, reader) if enable_ocr else []
+    
+    # Optional Vision Analysis
+    full_vision = []
+    if enable_vision:
+        print(f" Extracting vision context ({vision_model} at {vision_interval}s interval, {vision_concurrency} threads)...")
+        full_vision = get_vision_descriptions(VIDEO_PATH, vision_model, vision_interval, vision_concurrency)
     
     # 2. Generate semantic chapters
     print(" Analyzing semantic chapters...")
@@ -201,12 +183,14 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
         upcoming_context = "\n".join(up_lines) if up_lines else "[End of video]"
         
         chunk_o = "\n".join([l for l in full_ocr if prev_start <= extract_ocr_time(l) <= up_end])
+        chunk_v = "\n".join([l for l in full_vision if prev_start <= extract_ocr_time(l) <= up_end]) # Using same time extractor since format is identical
         
         print(f"[PASS 1] Scouting {window_label}...")
         
-        found = pass_1_scout(chunk_t, chunk_o, window_label, prev_ctx=previous_context, 
+        scout_model_to_use = SCOUT_MODEL  # Always use the reasoning model for scouting; vision model is only for frame reading
+        found = pass_1_scout(chunk_t, chunk_o, chunk_v, window_label, prev_ctx=previous_context, 
                            up_ctx=upcoming_context, min_dur=MIN_CLIP_DURATION, max_dur=MAX_CLIP_DURATION,
-                           system_instruction=scout_system_instruction, user_prompt=scout_user_prompt)
+                           system_instruction=scout_system_instruction, user_prompt=scout_user_prompt, model_name=scout_model_to_use)
         
         if found: 
             print(f"  -> LLM returned {len(found)} potential clips. Validating...")
@@ -280,8 +264,15 @@ def _run_clipper_logic(scout_system_instruction=None, scout_user_prompt=None, ed
                     s = max(0.0, true_start - pad_s)
                     e = min(video.duration, true_end + pad_e)
                     
-                    clip_title = selected_clip.get('title', 'Untitled')
-                    file_name = f"viral_clip_{i+1}.mp4"
+                    clip_title = selected_clip.get('clip_title', selected_clip.get('title', f'clip_{i+1}'))
+                    # Sanitize title for file name: lowercase, replace spaces with underscores, remove special chars
+                    safe_title = clip_title.lower().strip()
+                    safe_title = safe_title.replace(' ', '_').replace("'", '').replace('"', '')
+                    safe_title = ''.join(c for c in safe_title if c.isalnum() or c == '_')
+                    safe_title = safe_title[:50]  # Truncate to 50 chars max
+                    if not safe_title:
+                        safe_title = f'clip_{i+1}'
+                    file_name = f"{i+1}_{safe_title}.mp4"
                     output_fn = os.path.join(OUTPUT_DIR, file_name)
                     
                     print(f"\n[EXPORT] {file_name} ({format_time(s)} - {format_time(e)})")
@@ -536,28 +527,108 @@ def get_ocr_list(video_path, reader):
     cap.release()
     return ocr_data
 
+def get_vision_descriptions(video_path, model_name, interval=2.0, max_workers=2):
+    import concurrent.futures
+    print(f"[LOG] Scanning keyframes for Vision LLM with concurrency={max_workers}...")
+    cap = cv2.VideoCapture(video_path)
+    vision_data = []
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    skip_interval = int(fps * interval) 
+    
+    pbar = tqdm(total=total_frames)
+    frame_count = 0
+    url = f"{LM_STUDIO_URL}/chat/completions" if LM_STUDIO_URL.startswith("http") else f"http://{LM_STUDIO_URL}/chat/completions"
+    
+    tasks = []
+
+    while True:
+        ret = cap.grab()
+        if not ret: break
+        
+        if frame_count % skip_interval == 0:
+            ret, frame = cap.retrieve()
+            if ret:
+                # Convert frame to base64
+                _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                b64_img = base64.b64encode(buffer).decode('utf-8')
+                tasks.append((b64_img, frame_count/fps))
+                    
+        frame_count += 1
+        pbar.update(1)
+        
+    pbar.close()
+    cap.release()
+    
+    def _process_frame(task):
+        b64_img, timestamp = task
+        try:
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Describe the main action, emotion, or event in this frame concisely. Focus on human subjects and key objects."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                        ]
+                    }
+                ],
+                "temperature": 0.1,
+                "max_tokens": 50
+            }
+            response = requests.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            desc = response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip().replace('\n', ' ')
+            return f"[{timestamp:.1f}s] VISUAL CONTEXT: {desc}"
+        except Exception as e:
+            return f"[{timestamp:.1f}s] [ERROR] Vision API failed: {e}"
+
+    print(f"[LOG] Sending {len(tasks)} frames to Vision LLM concurrently...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_process_frame, task): task for task in tasks}
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(tasks)):
+            result = future.result()
+            vision_data.append(result)
+            
+    def _extract_time(s):
+        try: return float(s.split("s]")[0].strip("["))
+        except: return 0.0
+    
+    vision_data.sort(key=_extract_time)
+    return vision_data
+
 # --- PASS 1: THE SCOUT ---
-def pass_1_scout(transcript_chunk, ocr_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0, system_instruction=None, user_prompt=None):
+def pass_1_scout(transcript_chunk, ocr_chunk, vision_chunk, window_label, prev_ctx="", up_ctx="", min_dur=45.0, max_dur=90.0, system_instruction=None, user_prompt=None, model_name=None):
     if not system_instruction or not user_prompt:
         print("[ERROR] Missing required scenarios prompts for pass 1 scout. Returning [].")
         return []
     
+    if not model_name:
+        model_name = SCOUT_MODEL
+    
     # Format prompts with actual values
     formatted_system = system_instruction.format(
         min_dur=min_dur, max_dur=max_dur, window_label=window_label,
-        prev_ctx=prev_ctx, transcript_chunk=transcript_chunk, up_ctx=up_ctx, ocr_chunk=ocr_chunk
+        prev_ctx=prev_ctx, transcript_chunk=transcript_chunk, up_ctx=up_ctx, ocr_chunk=ocr_chunk, vision_chunk=vision_chunk
     )
     formatted_user = user_prompt.format(
         window_label=window_label, prev_ctx=prev_ctx, transcript_chunk=transcript_chunk, 
-        up_ctx=up_ctx, ocr_chunk=ocr_chunk, min_dur=min_dur, max_dur=max_dur
+        up_ctx=up_ctx, ocr_chunk=ocr_chunk, vision_chunk=vision_chunk, min_dur=min_dur, max_dur=max_dur
     )
     
-    # Debug: Show formatted prompts
-    # print(f"\n[DEBUG] Formatted System Prompt:\n{formatted_system}\n")
-    # print(f"\n[DEBUG] Formatted User Prompt:\n{formatted_user}\n")
+
+    
+    total_chars = len(formatted_system) + len(formatted_user)
+    print(f"\n[DIAGNOSTICS] {window_label} Payload Breakdown:")
+    print(f"  -> Transcript Chunk: {len(transcript_chunk)} chars")
+    print(f"  -> OCR Chunk: {len(ocr_chunk)} chars")
+    print(f"  -> Vision Chunk: {len(vision_chunk)} chars")
+    print(f"  -> Total Payload Size: {total_chars} chars (Approx. {total_chars // 4} tokens)")
+
     
     try:
-        model = client.llm.model(SCOUT_MODEL)
+        model = client.llm.model(model_name)
         response = model.respond(
             history={"messages": [{"role": "system", "content": formatted_system}, {"role": "user", "content": formatted_user}]},
             config={"temperature": 0.2} 

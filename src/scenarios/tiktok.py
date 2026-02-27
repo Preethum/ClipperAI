@@ -19,13 +19,19 @@ def get_tiktok_config():
             "clipper": {
                 "enabled": True,
                 "min_clip_duration": 15.0,  # Shorter clips for TikTok
-                "max_clip_duration": 60.0,
+                "max_clip_duration": 90.0,
                 "max_total_clips": 20,  # More clips for TikTok
                 
-                # ClipperM accepted parameters
                 "scout_model": "deepseek-r1-distill-qwen-32b",
                 "editor_model": "google/gemma-3-27b",
                 "lm_studio_url": "http://localhost:1234/v1",
+                
+                # Vision and OCR Settings
+                "enable_ocr": False,
+                "enable_vision": True,
+                "vision_model": "qwen/qwen3-vl-30b",
+                "vision_interval": 2.0,
+                "vision_concurrency": 10,
                 
                 # Deduplication settings
                 "deduplication_threshold": 0.5,  # Less aggressive for podcast content
@@ -62,7 +68,9 @@ def get_tiktok_config():
                     "11. THE 'SKIP' RULE: If the transcript is boring, logistical, or lacks a satisfying payoff, DO NOT force a clip. Output an empty JSON array [].\n\n"
                     "### PHASE 6: CHAIN OF THOUGHT\n"
                     "Your </think> block MUST explicitly calculate: End_Time - Start_Time = Duration. If the Duration is less than {min_dur} seconds, you must rewrite the clip to include more setup.\n"
-                    "Output ONLY the </think> block followed immediately by the raw JSON array. Do not output any other text."
+                    "Output ONLY the </think> block followed immediately by the raw JSON array. Do not output any other text.\n\n"
+                    "### PHASE 7: BREVITY RULE (CRITICAL)\n"
+                    "Keep ALL text fields concise. The 'reasoning' field MUST be 10 sentences maximum. The 'context_check' and 'temporal_math' fields MUST each be 3 sentences maximum. Do NOT write paragraphs."
                 ),
                 
                 "scout_user_prompt": (
@@ -71,6 +79,7 @@ def get_tiktok_config():
                     "--- CURRENT CHAPTER (Main focus area) ---{transcript_chunk}\n\n"
                     "--- UPCOMING CONTEXT (What happens right after this chunk) ---{up_ctx}\n\n"
                     "--- FULL CONTEXT OCR (Visual Scene Transitions) ---{ocr_chunk}\n\n"
+                    "--- FULL VISUAL CONTEXT (Keyframe Descriptions) ---{vision_chunk}\n\n"
                     "INSTRUCTIONS:\n"
                     "Extract ALL standalone 'Golden Moments'. You may pull timestamps from the Previous or Upcoming Contexts if the narrative requires it. Return the JSON using the following schema (return [] if no moments meet the high standards):\n"
                     "[\n"
@@ -85,7 +94,7 @@ def get_tiktok_config():
                     "    \"temporal_math\": \"Detailed calculation of the padding chosen.\",\n"
                     "    \"context_check\": \"Explanation of why this clip makes sense standalone.\",\n"
                     "    \"virality_metrics\": {{\"hook_strength\": 95, \"payoff_satisfaction\": 90, \"retention_potential\": 85}},\n"
-                    "    \"reasoning\": \"Why this moment will perform well on TikTok.\"\n"
+                    "    \"reasoning\": \"2 sentences max: why this moment will perform well on TikTok.\"\n"
                     "  }}\n"
                     "]"
                 ),
@@ -135,7 +144,7 @@ def get_tiktok_config():
                 "enabled": True,
                 
                 # SubsM accepted parameters - TikTok optimized
-                "template": "templates/explosive",  # More dynamic template
+                "template": "templates/hype",  # More dynamic template
                 "vertical_align_offset": 0.75,  # Lower positioning for TikTok
                 "max_width_ratio": 0.85,  # Slightly narrower for mobile
                 "max_lines": 2  # Allow more lines for TikTok
