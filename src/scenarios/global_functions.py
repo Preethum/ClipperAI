@@ -82,16 +82,14 @@ def setup_directories(base_output_dir):
     # Create temporary directories for each module
     clipper_output_dir = base_dir / "01_clips"
     cropper_output_dir = base_dir / "02_cropped"
-    subs_output_dir = base_dir / "03_final"
+    # Final output goes directly to the base directory
+    subs_output_dir = base_dir
     
     # Create directories
     temp_dirs = []
     for dir_path in [clipper_output_dir, cropper_output_dir]:
         dir_path.mkdir(parents=True, exist_ok=True)
         temp_dirs.append(str(dir_path))
-    
-    # Create final output directory separately (don't add to temp_dirs for cleanup)
-    subs_output_dir.mkdir(parents=True, exist_ok=True)
     
     directories = {
         "clipper_output_dir": clipper_output_dir,
@@ -137,22 +135,28 @@ def run_clipper_module(input_video, output_dir, config):
         print(f"🔧 Added {LOCAL_BIN_DIR} to PATH for ClipperM module")
     
     try:
-        # Run clipper main function with only the parameters it actually accepts
+        print(f"[DEBUG GLOBAL_FUNCTIONS] Config vision_concurrency is: {config.get('vision_concurrency')}")
+        # Run clipper main function - all parameters must be defined in scenario config
         clips = clipper_main(
             input_video_path=input_video,
             output_dir=output_dir,
-            lm_studio_url=config.get("lm_studio_url", "http://localhost:1234/v1"),
-            scout_model=config.get("scout_model", "deepseek-r1-distill-qwen-32b"),
-            editor_model=config.get("editor_model", "google/gemma-3-27b"),
-            min_clip_duration=config.get("min_clip_duration", 45.0),
-            max_clip_duration=config.get("max_clip_duration", 90.0),
-            max_total_clips=config.get("max_total_clips", 10),
-            viral_archetypes=config.get("viral_archetypes"),
-            scout_system_instruction=config.get("scout_system_instruction"),
-            scout_user_prompt=config.get("scout_user_prompt"),
-            editor_system_instruction=config.get("editor_system_instruction"),
-            editor_user_prompt=config.get("editor_user_prompt"),
-            deduplication_threshold=config.get("deduplication_threshold")
+            lm_studio_url=config["lm_studio_url"],
+            scout_model=config["scout_model"],
+            editor_model=config["editor_model"],
+            min_clip_duration=config["min_clip_duration"],
+            max_clip_duration=config["max_clip_duration"],
+            max_total_clips=config["max_total_clips"],
+            viral_archetypes=config["viral_archetypes"],
+            scout_system_instruction=config["scout_system_instruction"],
+            scout_user_prompt=config["scout_user_prompt"],
+            editor_system_instruction=config["editor_system_instruction"],
+            editor_user_prompt=config["editor_user_prompt"],
+            deduplication_threshold=config["deduplication_threshold"],
+            enable_ocr=config["enable_ocr"],
+            enable_vision=config["enable_vision"],
+            vision_model=config["vision_model"],
+            vision_interval=config["vision_interval"],
+            vision_concurrency=config["vision_concurrency"]
         )
         
         print(f"✅ Clipper module completed. Generated {len(clips)} clips.")
@@ -198,7 +202,7 @@ def run_cropper_module(input_clips, output_dir, config):
     
     for i, clip in enumerate(input_clips):
         input_path = clip["file_path"]
-        output_path = os.path.join(output_dir, f"cropped_{clip['file_name']}")
+        output_path = os.path.join(output_dir, clip['file_name'])
         
         print(f"\n🎥 Processing clip {i+1}/{len(input_clips)}: {clip['file_name']}")
         
@@ -219,9 +223,12 @@ def run_cropper_module(input_clips, output_dir, config):
             
             if os.path.exists(output_path):
                 cropped_clips.append({
-                    "file_name": f"cropped_{clip['file_name']}",
+                    "file_name": clip['file_name'],
                     "file_path": output_path,
-                    "original_clip": clip
+                    "title": clip.get('title', 'Untitled'),
+                    "start_time": clip.get('start_time', 0),
+                    "end_time": clip.get('end_time', 0),
+                    "duration": clip.get('duration', 0)
                 })
                 print(f"✅ Cropped: {output_path}")
             else:
@@ -272,7 +279,8 @@ def run_subs_module(input_clips, output_dir, config):
     
     for i, clip in enumerate(input_clips):
         input_path = clip["file_path"]
-        output_path = os.path.join(output_dir, f"final_{clip['file_name']}")
+        # Use the same file name (no 'final_' prefix)
+        output_path = os.path.join(output_dir, clip['file_name'])
         
         print(f"\n🎬 Adding subtitles to clip {i+1}/{len(input_clips)}: {clip['file_name']}")
         
@@ -288,9 +296,12 @@ def run_subs_module(input_clips, output_dir, config):
         
         if success and os.path.exists(output_path):
             final_clips.append({
-                "file_name": f"final_{clip['file_name']}",
+                "file_name": clip['file_name'],
                 "file_path": output_path,
-                "original_clip": clip
+                "title": clip.get('title', 'Untitled'),
+                "start_time": clip.get('start_time', 0),
+                "end_time": clip.get('end_time', 0),
+                "duration": clip.get('duration', 0)
             })
             print(f"✅ Subtitles added: {output_path}")
         else:
@@ -372,7 +383,14 @@ def run_complete_pipeline(config):
         if final_clips:
             print(f"\n📹 Final videos:")
             for clip in final_clips:
-                print(f"   - {clip['file_name']}: {clip['title']}")
+                print(f"   - {clip.get('file_name', 'unknown')}: {clip.get('title', 'Untitled')}")
+            
+            # Export final metadata JSON alongside the videos
+            metadata_path = os.path.join(str(directories['subs_output_dir']), 'clips_metadata.json')
+            import json
+            with open(metadata_path, 'w') as f:
+                json.dump(final_clips, f, indent=4)
+            print(f"\n📋 Metadata saved: {metadata_path}")
         
         return final_clips
         
