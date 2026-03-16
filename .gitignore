@@ -15,6 +15,7 @@ __pycache__/
 # Keep folders but ignore contents
 models/*
 !models/.gitkeep
+!models/apex_gaming.pt
 
 Train/import_to_label_studio/*
 !Train/import_to_label_studio/.gitkeep
