@@ -8,6 +8,7 @@ import json
 import time
 import numpy as np
 from pathlib import Path
+from typing import List, Tuple
 
 
 class _NumpyEncoder(json.JSONEncoder):
@@ -190,3 +191,224 @@ def run_complete_pipeline(config):
         import traceback
         traceback.print_exc()
         return []
+
+def run_gaming_pipeline(config):
+    """Run the complete YOLO/OCR gaming pipeline using global configuration."""
+    source_video = config.get("input_video")
+    output_dir = config.get("base_output_dir", "output")
+    modules = config.get("modules", {})
+    
+    os.makedirs(output_dir, exist_ok=True)
+    _ensure_bin_path()
+    
+    detector_cfg = modules.get("detector", {})
+    audio_cfg = modules.get("audio", {})
+    clumper_cfg = modules.get("clumper", {})
+    safe_entry_cfg = modules.get("safe_entry_exit", {})
+    renderer_cfg = modules.get("renderer", {})
+    
+    steps = []
+    if detector_cfg.get("enabled", True): steps.append("detection")
+    if audio_cfg.get("enabled", True): steps.append("audio")
+    if clumper_cfg.get("enabled", True): steps.append("clumping")
+    if safe_entry_cfg.get("enabled", True): steps.append("pacing")
+    if renderer_cfg.get("enabled", True): steps.append("renderer")
+    
+    total = len(steps)
+    step_num = 0
+    pipeline_start = time.time()
+    
+    print(f"\n{'━' * 50}")
+    print(f"  🎮  Gaming Highlight Pipeline")
+    print(f"{'━' * 50}")
+    _status(f"Source:  {os.path.basename(source_video)}")
+    _status(f"Output:  {output_dir}")
+    _status(f"Steps:   {' → '.join(s.upper() for s in steps)}")
+
+    try:
+        events_json = os.path.join(output_dir, "events.json")
+        audio_events_json = os.path.join(output_dir, "audio_events.json")
+        clips_json = os.path.join(output_dir, "clips.json")
+        
+        audio_analyzer = None
+        audio_events = []
+
+        # ── AUDIO ANALYSIS (Moved to Step 1 for pruning) ──
+        if "audio" in steps:
+            step_num += 1
+            _header(step_num, "🔊", "AUDIO — Combat Intensity Scoring", total)
+            t0 = time.time()
+            try:
+                from AudioAnalyzerM import AudioAnalyzer
+                audio_analyzer = AudioAnalyzer(
+                    video_path=source_video,
+                    chunk_sec=audio_cfg.get("chunk_sec", 1.0),
+                    device=audio_cfg.get("device", 0),
+                    score_threshold=audio_cfg.get("threshold", 0.3)
+                )
+                
+                audio_events = audio_analyzer.process_gameplay(output_path=audio_events_json)
+                _status(f"✅ Audio processed: {len(audio_events)} combat spikes found ({time.time()-t0:.0f}s)")
+            except Exception as e:
+                _status(f"⚠️ Audio analysis failed: {e}. Falling back to full visual scan.")
+
+        # ── DETECTION (vision + OCR) ──
+        if "detection" in steps:
+            step_num += 1
+            _header(step_num, "🎯", "DETECTION — YOLO & OCR Scanning", total)
+            t0 = time.time()
+            from DetectionM import GameEventDetector
+            detector = GameEventDetector(detector_cfg.get("model_path"), enable_ocr=detector_cfg.get("enable_ocr", True))
+            _status(f"YOLO Model: {detector_cfg.get('model_path')}")
+            
+            # Create sampling windows from audio if available
+            scan_windows = None
+            if audio_events:
+                scan_windows = _get_scan_windows(audio_events, padding=15.0)
+                _status(f"Audio-Guided Pruning: Scanning only {len(scan_windows)} active segments.")
+
+            all_events = detector.detect_events(
+                source_video, 
+                interval_seconds=detector_cfg.get("interval_seconds", 1.0),
+                min_confidence=detector_cfg.get("min_confidence", 0.5),
+                target_labels=detector_cfg.get("target_labels", ["Victory", "ELIMINATED Text", "loating Damage Numbers", "Directional Damage Indicators"]),
+                label_weights=detector_cfg.get("label_weights", None),
+                debug=detector_cfg.get("debug", False),
+                include_windows=scan_windows
+            )
+            
+            # Merge audio events into the result set
+            if audio_events and audio_cfg.get("merge_to_events", True):
+                for ts, label, score in audio_events:
+                    all_events.append({"timestamp_s": ts, "label": label, "confidence": score, "text": ""})
+            
+            all_events.sort(key=lambda e: e.get('timestamp_s', 0))
+            
+            with open(events_json, 'w', encoding='utf-8') as f:
+                json.dump(all_events, f, indent=2, ensure_ascii=False)
+            _status(f"✅ {len(all_events)} total events found ({time.time()-t0:.0f}s)")
+            
+        if not os.path.exists(events_json):
+            print("\n  ❌ No valid events.json found. Stopping.")
+            return []
+
+        # ── CLUMPING ──
+        if "clumping" in steps:
+            step_num += 1
+            _header(step_num, "🎬", "CLUMPING — Building Highlights", total)
+            t0 = time.time()
+            from Clipper_gamingM import EventClumper
+            clumper = EventClumper(events_json, clumper_cfg.get("window_seconds", 60), clumper_cfg.get("intensity_weights", None))
+            
+            clumper_mode = clumper_cfg.get("mode", "sliding_window")
+            if clumper_mode == "elimination" and audio_events:
+                _status("Mode: Audio-Anchored Elimination Clips")
+                clips = clumper.detect_elimination_clips(
+                    audio_events=audio_events,
+                    elim_merge_gap=clumper_cfg.get("elim_merge_gap", 30.0),
+                    audio_lookback=clumper_cfg.get("audio_lookback", 30.0),
+                    audio_lookahead=clumper_cfg.get("audio_lookahead", 30.0),
+                    end_buffer=clumper_cfg.get("end_buffer", 5.0),
+                    clip_merge_gap=clumper_cfg.get("clip_merge_gap", 60.0),
+                )
+            else:
+                clips = clumper.detect_clips(clumper_cfg.get("min_intensity", 3.0), clumper_cfg.get("gap_threshold", 30.0))
+            
+            clumper.save_clips(clips_json)
+            _status(f"✅ {len(clips)} highlights assembled ({time.time()-t0:.0f}s)")
+            
+        # ── PACING (SAFE ENTRY/EXIT) ──
+        if "pacing" in steps:
+            step_num += 1
+            _header(step_num, "🔍", "PACING — Fine-tuning Cut Points", total)
+            t0 = time.time()
+            from SafeEntryExit import SafeEntryExitDetector
+            pacing_agent = SafeEntryExitDetector(
+                video_path=source_video,
+                vlm_model=safe_entry_cfg.get("vlm_model", "google/gemma-3-27b"),
+                fps=safe_entry_cfg.get("vlm_fps", 10),
+                audio_analyzer=audio_analyzer
+            )
+            try:
+                clips = pacing_agent.process_clips(clips_json, safe_entry_cfg.get("entry_buffer", 1.2), safe_entry_cfg.get("exit_buffer", 1.5))
+                _status(f"✅ {len(clips)} clips safely padded ({time.time()-t0:.0f}s)")
+            finally:
+                pacing_agent.close()
+                
+            # Plot overlay if audio exists
+            if audio_analyzer:
+                try:
+                    with open(events_json, 'r', encoding='utf-8') as f:
+                        ev_data = json.load(f)
+                    audio_len_sec = len(audio_analyzer._audio) / audio_analyzer._sr
+                    rms_profile = audio_analyzer.get_audio_intensity_profile(0, audio_len_sec, resolution=1.0)
+                    plot_path = os.path.join(output_dir, "audio_events_intensity.png")
+                    audio_analyzer.save_intensity_plot(rms_profile, ev_data, plot_path, clips)
+                except Exception as e:
+                    pass
+
+        # ── RENDERER ──
+        final_clips = []
+        if "renderer" in steps:
+            step_num += 1
+            _header(step_num, "🎥", "RENDERER — Exporting Final Videos", total)
+            t0 = time.time()
+            
+            # Read clips.json and convert to RendererM native manifest format 
+            with open(clips_json, 'r', encoding='utf-8') as f:
+                raw_clips = json.load(f)
+                
+            manifest = []
+            for i, c in enumerate(raw_clips):
+                st = c.get('safe_entry', {}).get('timestamp') or c['start_time']
+                et = c.get('safe_exit', {}).get('timestamp') or c['end_time']
+                manifest.append({
+                    "start": st, "end": et, "file_name": f"clip_{i+1}.mp4",
+                    "title": c.get('clip_id', f"Clip {i+1}"), "scores": c.get('scores', {})
+                })
+            
+            # Execute RendererM module natively
+            clips_output_dir = os.path.join(output_dir, "video_clips")
+            os.makedirs(clips_output_dir, exist_ok=True)
+            final_clips = renderer_main(source_video, manifest, clips_output_dir, renderer_cfg)
+            _status(f"✅ {len(final_clips)} videos rendered ({time.time()-t0:.0f}s)")
+
+        # ── DONE ──
+        elapsed = time.time() - pipeline_start
+        print(f"\n{'━' * 50}")
+        print(f"  🎉  Gaming Pipeline Complete — {len(final_clips) if final_clips else len(clips)} clips in {elapsed:.0f}s")
+        print(f"{'━' * 50}")
+        _status(f"📁 {output_dir}")
+        return final_clips
+
+    except Exception as e:
+        print(f"\n  ❌ Gaming Pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def _get_scan_windows(events: List, padding: float = 15.0) -> List[Tuple[float, float]]:
+    """Convert audio combat spikes into merged scanning windows for visual analysis."""
+    if not events:
+        return []
+    
+    # Extract timestamps from list of [ts, label, score]
+    timestamps = [e[0] for e in events]
+    raw_windows = [(ts - padding, ts + padding) for ts in timestamps]
+    raw_windows.sort()
+    
+    if not raw_windows:
+        return []
+    
+    merged = []
+    curr_start, curr_end = raw_windows[0]
+    
+    for next_start, next_end in raw_windows[1:]:
+        if next_start <= curr_end:
+            curr_end = max(curr_end, next_end)
+        else:
+            merged.append((max(0, curr_start), curr_end))
+            curr_start, curr_end = next_start, next_end
+            
+    merged.append((max(0, curr_start), curr_end))
+    return merged

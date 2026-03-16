@@ -1,0 +1,88 @@
+{
+  "_comment": "This is a template for creating custom game configurations. Copy this file and modify it for your specific game.",
+  "game_info": {
+    "name": "custom_game",
+    "description": "Custom game configuration template",
+    "platform": "pc",
+    "genre": "action"
+  },
+  "detection": {
+    "model_path": "yolov8m.pt",
+    "interval_seconds": 1.0,
+    "min_confidence": 0.5,
+    "enable_ocr": true,
+    "debug": false,
+    "target_labels": [
+      "Victory", 
+      "Eliminated Text", 
+      "Damage Numbers",
+      "Special Event"
+    ],
+    "label_weights": {
+      "Victory": 5.0,
+      "Eliminated Text": 4.0,
+      "Damage Numbers": 2.0,
+      "Special Event": 3.0
+    }
+  },
+  "scoring": {
+    "points_system": {
+      "elimination": 100,
+      "victory": 500,
+      "damage": 10,
+      "special_event": 200
+    },
+    "multipliers": {
+      "streak_bonus": 1.5,
+      "accuracy_bonus": 1.2,
+      "speed_bonus": 1.1
+    }
+  },
+  "audio": {
+    "enabled": true,
+    "device": 0,
+    "chunk_sec": 1.0,
+    "threshold": 0.30,
+    "merge_to_events": true
+  },
+  "clumping": {
+    "mode": "elimination",
+    "elim_merge_gap": 30.0,
+    "audio_lookback": 30.0,
+    "audio_lookahead": 30.0,
+    "end_buffer": 5.0,
+    "clip_merge_gap": 60.0,
+    "window_seconds": 60,
+    "min_intensity": 3.0,
+    "gap_threshold": 30.0,
+    "intensity_weights": {
+      "base_score": 1.0,
+      "combat_bonus": 2.0,
+      "high_confidence_bonus": 0.5,
+      "squad_wipe_bonus": 1.5,
+      "high_damage_bonus": 1.0,
+      "elimination_bonus": 1.0,
+      "label_bonuses": {
+        "Victory": 5.0,
+        "Eliminated Text": 4.0,
+        "Damage Numbers": 2.0,
+        "Special Event": 3.0
+      }
+    }
+  },
+  "safe_entry_exit": {
+    "enabled": true,
+    "vlm_model": "google/gemma-3-27b",
+    "vlm_fps": 10,
+    "entry_buffer": 1.2,
+    "exit_buffer": 1.5
+  },
+  "rendering": {
+    "enabled": true,
+    "format": "mp4",
+    "encoder": "auto",
+    "quality": "balanced",
+    "crf": null,
+    "preset": null
+  }
+}

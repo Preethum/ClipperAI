@@ -1,0 +1,100 @@
+{
+  "game_info": {
+    "name": "apex_legends",
+    "description": "Apex Legends battle royale game configuration",
+    "platform": "pc",
+    "genre": "battle_royale"
+  },
+  "detection": {
+    "model_path": "yolov8m.pt",
+    "interval_seconds": 1.0,
+    "min_confidence": 0.5,
+    "enable_ocr": true,
+    "debug": false,
+    "target_labels": [
+      "Victory", 
+      "ELIMINATED Text", 
+      "Floating Damage Numbers", 
+      "Directional Damage Indicators",
+      "Downed Player",
+      "Revive Indicator",
+      "Supply Drop"
+    ],
+    "label_weights": {
+      "Victory": 5.0,
+      "ELIMINATED Text": 4.0,
+      "Floating Damage Numbers": 2.0,
+      "Directional Damage Indicators": 1.5,
+      "Downed Player": 3.0,
+      "Revive Indicator": 2.5,
+      "Supply Drop": 1.0
+    }
+  },
+  "scoring": {
+    "points_system": {
+      "elimination": 100,
+      "victory": 1000,
+      "damage": 5,
+      "down": 50,
+      "revive": 75,
+      "supply_drop": 25,
+      "squad_wipe": 500
+    },
+    "multipliers": {
+      "streak_bonus": 1.5,
+      "accuracy_bonus": 1.2,
+      "speed_bonus": 1.1,
+      "squad_bonus": 2.0
+    }
+  },
+  "audio": {
+    "enabled": true,
+    "device": 0,
+    "chunk_sec": 1.0,
+    "threshold": 0.30,
+    "merge_to_events": true
+  },
+  "clumping": {
+    "mode": "elimination",
+    "elim_merge_gap": 30.0,
+    "audio_lookback": 30.0,
+    "audio_lookahead": 30.0,
+    "end_buffer": 5.0,
+    "clip_merge_gap": 60.0,
+    "window_seconds": 60,
+    "min_intensity": 3.0,
+    "gap_threshold": 30.0,
+    "intensity_weights": {
+      "base_score": 1.0,
+      "combat_bonus": 2.0,
+      "high_confidence_bonus": 0.5,
+      "squad_wipe_bonus": 1.5,
+      "high_damage_bonus": 1.0,
+      "elimination_bonus": 1.0,
+      "label_bonuses": {
+        "Victory": 10.0,
+        "ELIMINATED Text": 8.0,
+        "Floating Damage Numbers": 3.0,
+        "Directional Damage Indicators": 2.0,
+        "Downed Player": 6.0,
+        "Revive Indicator": 4.0,
+        "Supply Drop": 1.5
+      }
+    }
+  },
+  "safe_entry_exit": {
+    "enabled": true,
+    "vlm_model": "google/gemma-3-27b",
+    "vlm_fps": 10,
+    "entry_buffer": 1.2,
+    "exit_buffer": 1.5
+  },
+  "rendering": {
+    "enabled": true,
+    "format": "mp4",
+    "encoder": "auto",
+    "quality": "balanced",
+    "crf": null,
+    "preset": null
+  }
+}

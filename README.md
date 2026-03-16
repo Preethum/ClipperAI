@@ -91,10 +91,13 @@ pip install -r requirements.txt
 
 ```bash
 # TikTok scenario — optimized for short, punchy vertical clips
-python src/scenarios/tiktok.py --input "your_video.mp4" --clips 5
+python src/scenarios/tiktok.py --input "your_video.mp4" --clips 5 --output "tiktok_output"
 
 # Podcast scenario — longer, more conversational clips
-python src/scenarios/podcast.py --input "podcast_episode.mp4" --clips 10
+python src/scenarios/podcast.py --input "podcast_episode.mp4" --clips 10 --output "podcast_output"
+
+# Gaming scenario — AI-powered HUD detection, Audio Clumping and Cushioning
+python src/scenarios/gaming_pipeline.py --input "gameplay.mp4" --model "Train/runs/detect/train/weights/best.pt" --output "gaming_output"
 ```
 
 ### What You'll See
@@ -144,7 +147,11 @@ ClipperAI/
 │   │   ├── ClipperM.py           # AI clip extraction (Scout + Editor LLM pipeline)
 │   │   ├── CropperM.py           # Smart cropping (YOLO + scene detection)
 │   │   ├── SubsM.py              # Subtitle transcription (Whisper + PyCaps)
-│   │   └── RendererM.py          # Single-pass video compositor
+│   │   ├── RendererM.py          # Single-pass video compositor (Hardware Acceleration)
+│   │   ├── AudioAnalyzerM.py     # Audio intensity & combat spike detector
+│   │   ├── DetectionM.py         # YOLO & OCR scanning wrapper
+│   │   ├── SafeEntryExit.py      # Cushioning fine-tuning via VLM/Audio
+│   │   └── StitcherM.py          # Video stitching with progress bars
 │   ├── scenarios/                # Pre-built pipeline configurations
 │   │   ├── global_functions.py   # Pipeline orchestrator
 │   │   ├── tiktok.py             # TikTok-optimized scenario
@@ -258,6 +265,34 @@ Optimized for longer, conversational, story-driven clips.
 ```bash
 python src/scenarios/podcast.py --input "podcast.mp4" --clips 10
 ```
+
+### Gaming Scenario (`gaming_pipeline.py`)
+
+The ultimate AI-powered auto-clipper for gameplay videos (e.g., Apex Legends, Valorant). Uses a synchronized multi-stage architecture: **Scanner → Audio Score → Clumper → Pacing Cushion → Renderer**.
+
+| Stage | Module | Description |
+|---|---|---|
+| 🔊 **Audio** | AudioAnalyzerM | Scores combat intensity (spikes) for fast search pruning |
+| 🎯 **Scanner** | DetectionM | Cross-scans YOLO (kills, knocks) & OCR (Victory feeds) on audio-active windows |
+| 🎬 **Clumper** | Clipper_gamingM | Bundles frames & audio anchor intervals with smart merges into clips |
+| 🔍 **Pacing** | SafeEntryExit | Fine-tunes cut points with exact safety padding buffers (VLM or Audio based) |
+| 🎥 **Renderer** | RendererM | Single-pass compositing supporting fast **NVIDIA NVENC** Hardware Accel |
+
+**To run the full end-to-end pipeline:**
+```bash
+python src/scenarios/gaming_pipeline.py --input "gameplay.mp4" --model "Train/runs/detect/train/weights/best.pt" --game "apex_legends"
+```
+
+**Options:**
+- `--game`: Choose game pre-config: `apex_legends`, `valorant`, `fortnite`, `custom`.
+- `--model`: Your custom trained model weights (e.g. `.pt` from Label Studio updates).
+- `--window`: Clumping scanning bounds rate buffer (default 60s).
+- `--min_intensity`: Lower scores filter boundary threshold (0-10 max bounds).
+- `--no_safe_entry_exit`: Skip VLM/Audio cushioning for raw cuts.
+- `--no_render`: Disable clip output writes for rapid dry-runs.
+
+> [!TIP]
+> Use the scripts in the `Train/` directory for manual scrubbing (`scrub_frames.py`) or automated frame extraction (`extract_frames.py`) if you are building a custom dataset.
 
 ---
 

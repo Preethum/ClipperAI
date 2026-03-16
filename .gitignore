@@ -6,3 +6,18 @@ __pycache__/
 *.pt
 *.pth
 .vscode/
+*.yaml
+*.png
+*.jpeg
+*.jpg
+*.mkv
+
+# Keep folders but ignore contents
+Train/import_to_label_studio/*
+!Train/import_to_label_studio/.gitkeep
+Train/runs/detect/train8/*
+!Train/runs/detect/train8/.gitkeep
+Train/YOLO_Data/*
+!Train/YOLO_Data/.gitkeep
+Train/yolo_dataset/*
+!Train/yolo_dataset/.gitkeep

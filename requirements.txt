@@ -1,9 +1,11 @@
+absl-py==2.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.1
 attrs==25.4.0
 av==16.1.0
 certifi==2026.1.4
+cffi==2.0.0
 charset-normalizer==3.4.4
 click==8.2.1
 colorama==0.4.6
@@ -24,6 +26,7 @@ h11==0.16.0
 hf-xet==1.2.0
 httpcore==1.0.9
 httpx==0.28.1
+httpx-ws==0.8.2
 huggingface_hub==1.4.1
 idna==3.11
 ImageIO==2.37.2
@@ -34,14 +37,17 @@ json_repair==0.58.0
 kiwisolver==1.4.9
 lazy_loader==0.4
 llvmlite==0.46.0
+lmstudio==1.5.0
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 matplotlib==3.10.8
 mdurl==0.1.2
+mediapipe==0.10.32
 more-itertools==10.8.0
 movielite==0.2.2
 moviepy==2.2.1
 mpmath==1.3.0
+msgspec==0.20.0
 multiprocess==0.70.19
 networkx==3.6.1
 ninja==1.13.0
@@ -50,8 +56,7 @@ numpy==2.4.2
 onnxruntime==1.24.2
 openai==2.21.0
 openai-whisper==20250625
-opencv-python==4.13.0.92
-opencv-python-headless==4.13.0.92
+opencv-python==4.10.0.84
 packaging==26.0
 pictex==2.1.0
 pillow==11.3.0
@@ -65,11 +70,15 @@ psutil==7.2.2
 pybind11==3.0.2
 pycaps @ https://github.com/francozanardi/pycaps/archive/refs/heads/main.zip#sha256=16825b7efde502b4ac560b88e8806b1907d49a656019cc0e129179ba069473a2
 pyclipper==1.4.0
+pycparser==3.0
 pydantic==2.12.5
 pydantic_core==2.41.5
 pyee==13.0.1
 Pygments==2.19.2
 pyparsing==3.3.2
+PyQt6==6.10.2
+PyQt6-Qt6==6.10.2
+PyQt6_sip==13.11.0
 python-bidi==0.6.7
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
@@ -85,6 +94,7 @@ shellingham==1.5.4
 six==1.17.0
 skia-python==138.0
 sniffio==1.3.1
+sounddevice==0.5.5
 stretchable==1.1.8
 sympy==1.14.0
 tifffile==2026.2.20
@@ -102,3 +112,4 @@ uharfbuzz==0.53.3
 ultralytics==8.4.14
 ultralytics-thop==2.0.18
 urllib3==2.6.3
+wsproto==1.3.2

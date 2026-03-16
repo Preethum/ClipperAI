@@ -438,7 +438,7 @@ def normalize_to_cfr(video_path, output_path, total_duration=0):
     command = [
         get_ffmpeg_path('ffmpeg'), '-y', '-i', video_path,
         '-vsync', 'cfr', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-        '-c:a', 'copy', output_path
+        '-c:a', 'aac', output_path
     ]
     if total_duration > 0:
         returncode, stderr_text = run_ffmpeg_with_progress(command, total_duration, desc="VFR → CFR")
@@ -941,7 +941,7 @@ def main(input_video_path, output_video_path, ratio='9:16', quality='balanced', 
     input_has_audio = has_audio_stream(input_video)
 
     if input_has_audio:
-        print("\n🔊 Step 5: Extracting original audio...")
+        print("\n[Audio] Step 5: Extracting original audio...")
         step_start_time = time.time()
 
         # Some files have a non-zero video start_time (e.g. audio starts at 0s
