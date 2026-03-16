@@ -13,6 +13,9 @@ __pycache__/
 *.mkv
 
 # Keep folders but ignore contents
+models/*
+!models/.gitkeep
+
 Train/import_to_label_studio/*
 !Train/import_to_label_studio/.gitkeep
 Train/runs/detect/train8/*
