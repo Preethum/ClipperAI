@@ -25,6 +25,7 @@ def main():
             format="engine",
             imgsz=args.imgsz,
             half=args.half,
+            dynamic=True,
             verbose=True
         )
         print(f"\n✅ Export successful! Model saved to: {exported_path}")

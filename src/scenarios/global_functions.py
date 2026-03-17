@@ -208,8 +208,8 @@ def run_gaming_pipeline(config):
     renderer_cfg = modules.get("renderer", {})
     
     steps = []
-    if detector_cfg.get("enabled", True): steps.append("detection")
     if audio_cfg.get("enabled", True): steps.append("audio")
+    if detector_cfg.get("enabled", True): steps.append("detection")
     if clumper_cfg.get("enabled", True): steps.append("clumping")
     if safe_entry_cfg.get("enabled", True): steps.append("pacing")
     if renderer_cfg.get("enabled", True): steps.append("renderer")

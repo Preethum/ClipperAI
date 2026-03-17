@@ -101,6 +101,7 @@ class GameEventDetector:
         if YOLO is None:
             raise ImportError("ultralytics package required for YOLO detection")
             
+        self.model_path = model_path
         self.model = YOLO(model_path)
         self.enable_ocr = enable_ocr
         
@@ -149,7 +150,7 @@ class GameEventDetector:
         
         # Batching variables
         # Adjust batch size for TensorRT engines which are often compiled with static batch=1
-        batch_size = 1 if str(self.model_path).lower().endswith(".engine") else 128
+        batch_size = 16 if str(self.model_path).lower().endswith(".engine") else 128
         batch_frames = []
         batch_timestamps = []
         
@@ -183,8 +184,8 @@ class GameEventDetector:
                 frame_idx = target_frames[current_idx]
                 
                 if frame_idx != current_pos:
-                    # If gap is small (< 1000 frames), grabbing is usually faster than seeks
-                    if 0 < (frame_idx - current_pos) < 1000:
+                    # If gap is small (< 5 frames), grabbing is usually faster than seeks
+                    if 0 < (frame_idx - current_pos) < 5:
                         for _ in range(frame_idx - current_pos):
                             if cap.grab():
                                 current_pos += 1
@@ -241,7 +242,7 @@ class GameEventDetector:
         
         # 1. Batched YOLO
         with torch.no_grad():
-            results = self.model.predict(frames, conf=min_confidence, verbose=False, half=True, stream=False, batch=len(frames))
+            results = self.model.predict(frames, conf=min_confidence, verbose=False, half=False, stream=False, batch=len(frames))
         
         # 2. Collect all detections that need OCR
         pending_ocr = [] # List of (crop, event_dict)
