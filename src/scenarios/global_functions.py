@@ -264,18 +264,127 @@ def run_gaming_pipeline(config):
             # Create sampling windows from audio if available
             scan_windows = None
             if audio_events:
-                scan_windows = _get_scan_windows(audio_events, padding=15.0)
-                _status(f"Audio-Guided Pruning: Scanning only {len(scan_windows)} active segments.")
+                padding = audio_cfg.get("pruning_padding", 15.0)
+                scan_windows = _get_scan_windows(audio_events, padding=padding)
+                _status(f"Audio-Guided Pruning: Scanning {len(scan_windows)} active segments (padding: {padding}s).")
 
-            all_events = detector.detect_events(
-                source_video, 
-                interval_seconds=detector_cfg.get("interval_seconds", 1.0),
-                min_confidence=detector_cfg.get("min_confidence", 0.5),
-                target_labels=detector_cfg.get("target_labels", ["Victory", "ELIMINATED Text", "loating Damage Numbers", "Directional Damage Indicators"]),
-                label_weights=detector_cfg.get("label_weights", None),
-                debug=detector_cfg.get("debug", False),
-                include_windows=scan_windows
-            )
+            # --- Piped Stream Optimization (`ffmpeg image2pipe`) ---
+            use_fast_pipe = True
+            all_events = []
+            
+            if scan_windows and use_fast_pipe:
+                import subprocess
+                import cv2
+                import numpy as np
+                from AudioAnalyzerM import _get_ffmpeg_path
+                ffmpeg_cmd = _get_ffmpeg_path()
+                
+                _status(f"🚀 Speed Optimisation: Streaming frames into memory to bypass files-copy lags.")
+                
+                # Fetch dimensions accurately
+                cap = cv2.VideoCapture(source_video)
+                v_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                v_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap.release()
+                
+                if v_width <= 0 or v_height <= 0:
+                    use_fast_pipe = False  # fallback if failed to parse
+                    
+                if use_fast_pipe:
+                    interval_seconds = detector_cfg.get("interval_seconds", 1.0)
+                    # TensorRT models often default to static batch=1 shape, safeguard here
+                    batch_size = 1 if detector_cfg.get("model_path", "").endswith(".engine") else 128
+                    
+                    for i, (w_start, w_end) in enumerate(scan_windows):
+                        duration = w_end - w_start
+                        if duration <= 0: continue
+                        
+                        _status(f"   [Piped-Stream] Scanning segment {i+1}/{len(scan_windows)}: {w_start:.1f}s -> {w_end:.1f}s")
+                        
+                        # ffmpeg continuous stream with fully locked hardware acceleration
+                        fps_filter = f"fps=1/{interval_seconds}"
+                        cmd = [
+                            ffmpeg_cmd, 
+                            "-hwaccel", "cuda",  # Force GPU CUDA/NVDEC for frame extraction 
+                            "-ss", str(round(w_start, 2)), "-to", str(round(w_end, 2)), 
+                            "-i", source_video,
+                            "-vf", fps_filter,
+                            "-f", "image2pipe",
+                            "-vcodec", "rawvideo",
+                            "-pix_fmt", "bgr24",
+                            "-"
+                        ]
+                        
+                        # Use large bufsize (100MB) to remove stream bottlenecks and backpressure on Windows
+                        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+                        frame_size = v_width * v_height * 3
+                        
+                        batch_frames = []
+                        batch_timestamps = []
+                        window_f_idx = 0
+                        
+                        while True:
+                            t_read0 = time.time()
+                            raw_frame = process.stdout.read(frame_size)
+                            t_read1 = time.time()
+                            
+                            if not raw_frame or len(raw_frame) < frame_size:
+                                break
+                                
+                            t_proc0 = time.time()
+                            frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((v_height, v_width, 3))
+                            t_proc1 = time.time()
+                            
+                            # calculate exact time inside segment
+                            elapsed_s = window_f_idx * interval_seconds
+                            timestamp_s = w_start + elapsed_s
+                            
+                            batch_frames.append(frame)
+                            batch_timestamps.append(timestamp_s)
+                            window_f_idx += 1
+                            
+                            if len(batch_frames) >= batch_size:
+                                t_infer0 = time.time()
+                                window_events = detector._run_batch_inference(
+                                    batch_frames, batch_timestamps, 
+                                    detector_cfg.get("min_confidence", 0.5),
+                                    detector_cfg.get("target_labels", ["Victory", "ELIMINATED Text", "loating Damage Numbers", "Directional Damage Indicators"]),
+                                    detector_cfg.get("label_weights", None),
+                                    detector_cfg.get("debug", False)
+                                )
+                                t_infer1 = time.time()
+                                all_events.extend(window_events)
+                                batch_frames = []
+                                batch_timestamps = []
+                                
+                                # Diagnostic print
+                                print(f"⏱️ [Frame {window_f_idx}] Read: {t_read1-t_read0:.4f}s | Reshape: {t_proc1-t_proc0:.4f}s | Infer: {t_infer1-t_infer0:.4f}s")
+                                
+                        process.stdout.close()
+                        process.wait()
+                        
+                        # Process trailing batch
+                        if batch_frames:
+                            window_events = detector._run_batch_inference(
+                                batch_frames, batch_timestamps, 
+                                detector_cfg.get("min_confidence", 0.5),
+                                detector_cfg.get("target_labels", ["Victory", "ELIMINATED Text", "loating Damage Numbers", "Directional Damage Indicators"]),
+                                detector_cfg.get("label_weights", None),
+                                detector_cfg.get("debug", False)
+                            )
+                            all_events.extend(window_events)
+            
+            if not scan_windows or not use_fast_pipe:
+                # Fallback to standard discontinuous scan
+                all_events = detector.detect_events(
+                    source_video, 
+                    interval_seconds=detector_cfg.get("interval_seconds", 1.0),
+                    min_confidence=detector_cfg.get("min_confidence", 0.5),
+                    target_labels=detector_cfg.get("target_labels", ["Victory", "ELIMINATED Text", "loating Damage Numbers", "Directional Damage Indicators"]),
+                    label_weights=detector_cfg.get("label_weights", None),
+                    debug=detector_cfg.get("debug", False),
+                    include_windows=scan_windows
+                )
             
             # Merge audio events into the result set
             if audio_events and audio_cfg.get("merge_to_events", True):

@@ -126,7 +126,7 @@ def _cut_segment(source_video, start, duration, output_path, encoder_config=None
             audio_encoder = 'libopus'
             audio_args = ['-c:a', 'libopus', '-b:a', '128k']
         elif video_encoder == 'av1_nvenc':
-            video_args = ['-c:v', 'av1_nvenc', '-preset', 'slow', '-cq', '30']
+            video_args = ['-c:v', 'av1_nvenc', '-preset', 'fast', '-cq', '30']
             audio_encoder = 'aac'
             audio_args = ['-c:a', 'aac', '-b:a', '128k']
         else:
@@ -217,7 +217,7 @@ def _apply_final_compression(input_path, output_path, encoder_config=None):
             audio_encoder = 'libopus'
             audio_args = ['-c:a', 'libopus', '-b:a', '128k']
         elif video_encoder == 'av1_nvenc':
-            video_args = ['-c:v', 'av1_nvenc', '-preset', 'medium', '-cq', '25']
+            video_args = ['-c:v', 'av1_nvenc', '-preset', 'fast', '-cq', '25']
             audio_encoder = 'aac'
             audio_args = ['-c:a', 'aac', '-b:a', '128k']
         else:
@@ -278,7 +278,11 @@ def main(source_video, manifest, output_dir, config=None):
     else:
         print(f"⚠️  No AV1 encoders found, using H.264: {encoders['preferred_h264']}")
 
-    for i, clip in enumerate(manifest):
+    import threading
+    import concurrent.futures
+    list_lock = threading.Lock()
+    
+    def _render_single_clip(i, clip):
         clip_start = clip["start"]
         clip_end = clip["end"]
         clip_duration = clip_end - clip_start
@@ -295,9 +299,10 @@ def main(source_video, manifest, output_dir, config=None):
         print(f"     [{i+1}/{len(manifest)}] {file_name} ({clip_duration:.0f}s){tag_str}")
 
         base_name = os.path.splitext(file_name)[0]
-        temp_cut = os.path.join(output_dir, f"_temp_cut_{base_name}.mp4")
-        temp_crop = os.path.join(output_dir, f"_temp_crop_{base_name}.mp4")
-        temp_before_compression = os.path.join(output_dir, f"_temp_pre_compress_{base_name}.mp4")
+        # Unique temp paths per thread using base_name and i index to avoid collissions
+        temp_cut = os.path.join(output_dir, f"_temp_cut_{base_name}_{i}.mp4")
+        temp_crop = os.path.join(output_dir, f"_temp_crop_{base_name}_{i}.mp4")
+        temp_before_compression = os.path.join(output_dir, f"_temp_pre_compress_{base_name}_{i}.mp4")
 
         try:
             # CUT (with encoder support)
@@ -327,17 +332,18 @@ def main(source_video, manifest, output_dir, config=None):
                 os.remove(temp_before_compression)
 
             if os.path.exists(final_output):
-                exported_clips.append({
-                    "file_name": file_name,
-                    "file_path": final_output,
-                    "title": clip.get("title", "Untitled"),
-                    "start_time": clip_start,
-                    "end_time": clip_end,
-                    "duration": clip_duration,
-                    "viral_archetype": clip.get("viral_archetype", ""),
-                    "engagement_trigger": clip.get("engagement_trigger", ""),
-                    "scores": clip.get("scores", {})
-                })
+                with list_lock:
+                    exported_clips.append({
+                        "file_name": file_name,
+                        "file_path": final_output,
+                        "title": clip.get("title", "Untitled"),
+                        "start_time": clip_start,
+                        "end_time": clip_end,
+                        "duration": clip_duration,
+                        "viral_archetype": clip.get("viral_archetype", ""),
+                        "engagement_trigger": clip.get("engagement_trigger", ""),
+                        "scores": clip.get("scores", {})
+                    })
 
         except Exception as e:
             print(f"     ❌ {file_name}: {e}")
@@ -345,6 +351,17 @@ def main(source_video, manifest, output_dir, config=None):
                 if os.path.exists(tmp):
                     try: os.remove(tmp)
                     except OSError: pass
+
+    # Run in parallel using ThreadPoolExecutor (Safe for independent FFmpeg subprocesses)
+    max_workers = min(3, len(manifest))
+    if max_workers > 1:
+        print(f"     🚀 Processing with {max_workers} parallel GPU workers...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_render_single_clip, i, clip) for i, clip in enumerate(manifest)]
+            concurrent.futures.wait(futures)
+    else:
+        for i, clip in enumerate(manifest):
+            _render_single_clip(i, clip)
 
     # Save metadata
     if exported_clips:

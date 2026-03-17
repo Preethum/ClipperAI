@@ -148,7 +148,8 @@ class GameEventDetector:
         events = []
         
         # Batching variables
-        batch_size = 128 
+        # Adjust batch size for TensorRT engines which are often compiled with static batch=1
+        batch_size = 1 if str(self.model_path).lower().endswith(".engine") else 128
         batch_frames = []
         batch_timestamps = []
         
@@ -176,20 +177,27 @@ class GameEventDetector:
         # Create progress bar
         with tqdm(total=len(target_frames), desc="Processing frames", unit="frames") as pbar:
             current_idx = 0
+            current_pos = 0  # MANUALLY TRACKED FRAME POSITION
+            
             while current_idx < len(target_frames):
                 frame_idx = target_frames[current_idx]
                 
-                # Fast seek if move is forward and significant, or ANY backward move
-                current_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
                 if frame_idx != current_pos:
-                    # If gap is small (< 5 frames), grabbing is usually faster than seeking
-                    if 0 < (frame_idx - current_pos) < 5:
-                        for _ in range(frame_idx - current_pos - 1):
-                            cap.grab()
+                    # If gap is small (< 1000 frames), grabbing is usually faster than seeks
+                    if 0 < (frame_idx - current_pos) < 1000:
+                        for _ in range(frame_idx - current_pos):
+                            if cap.grab():
+                                current_pos += 1
+                            else:
+                                break
                     else:
                         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                        current_pos = frame_idx  # ASSUME SEEK SUCCEEDED
                 
                 ret, frame = cap.read()
+                if not ret:
+                    break
+                current_pos += 1  # Increment after read
                 if not ret:
                     break
                 
@@ -259,7 +267,7 @@ class GameEventDetector:
                 
                 # Extract crop for OCR
                 if self.enable_ocr and self.ocr_reader:
-                    labels_exempt_from_text = ["Directional Damage Indicators"]
+                    labels_exempt_from_text = ["Directional Damage Indicators", "loating Damage Numbers"]
                     if label not in labels_exempt_from_text:
                         try:
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())

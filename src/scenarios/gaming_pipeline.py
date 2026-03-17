@@ -61,7 +61,8 @@ class GameConfig:
                 "device": 0,
                 "chunk_sec": 1.0,
                 "threshold": 0.30,
-                "merge_to_events": True
+                "merge_to_events": True,
+                "pruning_padding": 15.0
             },
             
             # Clumping Configuration
@@ -449,7 +450,8 @@ def convert_game_config_to_pipeline_config(game_config):
                 "device": game_data.get("audio", {}).get("device", 0),
                 "chunk_sec": game_data.get("audio", {}).get("chunk_sec", 1.0),
                 "threshold": game_data.get("audio", {}).get("threshold", 0.30),
-                "merge_to_events": game_data.get("audio", {}).get("merge_to_events", True)
+                "merge_to_events": game_data.get("audio", {}).get("merge_to_events", True),
+                "pruning_padding": game_data.get("audio", {}).get("pruning_padding", 15.0)
             },
             
             "clumper": {
@@ -527,6 +529,7 @@ def main():
     parser.add_argument("--no_audio", action="store_true", help="Disable audio analysis")
     parser.add_argument("--audio_device", type=int, help="CUDA device for audio AST model (0=GPU0, -1=CPU)")
     parser.add_argument("--audio_threshold", type=float, help="Minimum audio combat score")
+    parser.add_argument("--audio_pruning_padding", type=float, help="Padding in seconds for audio-guided pruning (window = spike +/- padding)")
     
     # Video rendering overrides
     parser.add_argument("--no_render", action="store_true", help="Skip video rendering")
@@ -582,6 +585,7 @@ def main():
     if args.no_audio: m["audio"]["enabled"] = False
     if args.audio_device is not None: m["audio"]["device"] = args.audio_device
     if args.audio_threshold is not None: m["audio"]["threshold"] = args.audio_threshold
+    if args.audio_pruning_padding is not None: m["audio"]["pruning_padding"] = args.audio_pruning_padding
     
     # Clumping
     if args.window is not None: m["clumper"]["window_seconds"] = args.window
